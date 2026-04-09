@@ -19,7 +19,7 @@ model ChatSession {
   id          String   @id @default(cuid())
   title       String   @default("New Chat")
   hermesSessionId String?
-  model       String   @default("glm-4-plus")
+  model       String   @default("glm-5-plus")
   systemPrompt String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

@@ -10,7 +10,7 @@ const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1";
 interface ModelConfig {
   id: string;
   label: string;
-  provider: "nvidia" | "openai-compatible";
+  provider: "openai-compatible";
   baseURL: string;
   apiKeyEnv?: string;
   apiKey?: string;
@@ -92,21 +92,18 @@ const MODEL_REGISTRY: ModelConfig[] = [
   },
 ];
 
-const DEFAULT_MODEL = "glm-4-plus";
+const DEFAULT_MODEL = "glm-5-plus";
 
-/** Get model config by ID */
 function getModelConfig(modelId: string): ModelConfig {
   return MODEL_REGISTRY.find((m) => m.id === modelId) || MODEL_REGISTRY[0];
 }
 
-/** Get API key for a model */
 function getApiKey(model: ModelConfig): string {
   if (model.apiKey === "nvidia") return getNvidiaApiKey();
   if (model.apiKeyEnv) return process.env[model.apiKeyEnv] || "";
   return "";
 }
 
-/** Shape of an incoming chat request */
 interface ChatRequest {
   messages: { role: string; content: string }[];
   sessionId?: string;
@@ -115,9 +112,18 @@ interface ChatRequest {
 }
 
 /**
+ * Generate a concise title from the first user message.
+ */
+function generateTitle(content: string): string {
+  const cleaned = content.replace(/\n/g, " ").trim();
+  if (cleaned.length <= 50) return cleaned;
+  return cleaned.slice(0, 47) + "...";
+}
+
+/**
  * POST /api/chat
  * Send a message and get a streaming or non-streaming response.
- * Routes to the correct provider based on the model ID.
+ * If sessionId is provided, loads conversation history from DB to maintain context.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -156,43 +162,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Create or update session in database ──
+    // ── Resolve or create session ──
     let sessionId = body.sessionId;
-    let isFirstMessage = false;
 
     if (sessionId) {
-      // Check if session exists
       const session = await db.chatSession.findUnique({ where: { id: sessionId } }).catch(() => null);
       if (!session) sessionId = undefined;
     }
 
     if (!sessionId) {
-      // Auto-create session from first user message
-      isFirstMessage = true;
       const title = generateTitle(lastMessage.content);
       const newSession = await db.chatSession
-        .create({
-          data: { title, model: modelId },
-        })
+        .create({ data: { title, model: modelId } })
         .catch(() => null);
       sessionId = newSession?.id;
     }
 
-    // Save user message
+    // ── Load full message history from DB to maintain context ──
+    let fullHistory = body.messages;
+    if (sessionId) {
+      try {
+        const historyMessages = await db.chatMessage.findMany({
+          where: { sessionId },
+          orderBy: { createdAt: "asc" },
+          select: { role: true, content: true },
+        });
+
+        // Use DB history + the new user message from request body
+        if (historyMessages.length > 0) {
+          fullHistory = [
+            ...historyMessages.map((m) => ({ role: m.role, content: m.content })),
+            { role: lastMessage.role, content: lastMessage.content },
+          ];
+        }
+      } catch {
+        // Fallback to body messages
+        fullHistory = body.messages;
+      }
+    }
+
+    // ── Save user message to DB ──
     if (sessionId) {
       await db.chatMessage
         .create({
-          data: {
-            sessionId,
-            role: lastMessage.role,
-            content: lastMessage.content,
-          },
+          data: { sessionId, role: lastMessage.role, content: lastMessage.content },
         })
+        .catch(() => {});
+
+      // Touch session updatedAt
+      await db.chatSession
+        .update({ where: { id: sessionId }, data: { updatedAt: new Date() } })
         .catch(() => {});
     }
 
-    // ── Call the model ──
-    const response = await callModel(modelConfig, apiKey, body.messages, shouldStream);
+    // ── Call the model with full history ──
+    const response = await callModel(modelConfig, apiKey, fullHistory, shouldStream);
 
     if (shouldStream && response.body) {
       const stream = new TransformStream();
@@ -228,7 +252,6 @@ export async function POST(request: NextRequest) {
                 const parsed = JSON.parse(data);
                 await writer.write(encoder.encode(`data: ${data}\n\n`));
 
-                // Extract content for DB save
                 const delta = parsed.choices?.[0]?.delta;
                 if (delta?.content) {
                   fullContent += delta.content;
@@ -246,13 +269,13 @@ export async function POST(request: NextRequest) {
             const duration = Date.now() - startTime;
             await db.chatMessage
               .create({
-                data: {
-                  sessionId,
-                  role: "assistant",
-                  content: fullContent,
-                  duration,
-                },
+                data: { sessionId, role: "assistant", content: fullContent, duration },
               })
+              .catch(() => {});
+
+            // Touch session updatedAt again
+            await db.chatSession
+              .update({ where: { id: sessionId }, data: { updatedAt: new Date() } })
               .catch(() => {});
           }
           await writer.close();
@@ -272,23 +295,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Non-streaming response
+    // ── Non-streaming response ──
     const data = await response.json();
     const duration = Date.now() - startTime;
 
-    // Save assistant message
     if (sessionId) {
       const content = data.choices?.[0]?.message?.content || "";
       await db.chatMessage
         .create({
-          data: {
-            sessionId,
-            role: "assistant",
-            content,
-            duration,
-            tokens: data.usage?.total_tokens,
-          },
+          data: { sessionId, role: "assistant", content, duration, tokens: data.usage?.total_tokens },
         })
+        .catch(() => {});
+
+      await db.chatSession
+        .update({ where: { id: sessionId }, data: { updatedAt: new Date() } })
         .catch(() => {});
     }
 
@@ -343,13 +363,4 @@ async function callModel(
   }
 
   return response;
-}
-
-/**
- * Generate a concise title from the first user message.
- */
-function generateTitle(content: string): string {
-  const cleaned = content.replace(/\n/g, " ").trim();
-  if (cleaned.length <= 50) return cleaned;
-  return cleaned.slice(0, 47) + "...";
 }
