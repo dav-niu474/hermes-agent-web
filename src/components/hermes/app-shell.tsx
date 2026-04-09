@@ -1,0 +1,27 @@
+'use client';
+
+import { Sidebar } from '@/components/hermes/sidebar';
+import { Toaster } from '@/components/ui/sonner';
+import { TooltipProvider } from '@/components/ui/tooltip';
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div className="flex h-screen overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar />
+
+        {/* Main content */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Mobile spacer for fixed header */}
+          <div className="h-14 md:hidden shrink-0" />
+          {/* Page content */}
+          <div className="flex-1 overflow-y-auto">
+            {children}
+          </div>
+        </main>
+      </div>
+      <Toaster richColors position="bottom-right" />
+    </TooltipProvider>
+  );
+}

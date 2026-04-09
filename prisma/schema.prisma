@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatSession {
+  id          String   @id @default(cuid())
+  title       String   @default("New Chat")
+  hermesSessionId String?
+  model       String   @default("default")
+  systemPrompt String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // user, assistant, system, tool
+  content   String
+  toolCalls String?  // JSON string for tool call data
+  tokens    Int?
+  duration  Int?     // ms
+  createdAt DateTime @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model AgentConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  type  String @default("string") // string, number, boolean, json
+  group String @default("general")
+  label String?
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ToolUsage {
+  id        String   @id @default(cuid())
+  toolName  String
+  sessionId String?
+  status    String   @default("success") // success, error, pending
+  input     String?  // JSON
+  output    String?  // JSON
+  duration  Int?
+  createdAt DateTime @default(now())
+}
+
+model Skill {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  description String?
+  content     String?
+  isBuiltin   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CronJob {
+  id          String   @id @default(cuid())
+  name        String
+  schedule    String
+  task        String
+  isEnabled   Boolean  @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MemoryEntry {
+  id        String   @id @default(cuid())
+  category  String   @default("general")
+  content   String
+  tags      String?  // comma-separated
+  source    String?  // which session/conversation
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
