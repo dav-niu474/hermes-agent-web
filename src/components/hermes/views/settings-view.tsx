@@ -60,7 +60,7 @@ export function SettingsView() {
   });
 
   const [modelSettings, setModelSettings] = useState({
-    defaultModel: 'glm-4-plus',
+    defaultModel: 'glm-5-plus',
     smartRouting: true,
     maxSimpleChars: 160,
     cheapModel: 'nvidia/deepseek-llama3.1-8b-instruct',

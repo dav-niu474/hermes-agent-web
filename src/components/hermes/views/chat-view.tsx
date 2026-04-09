@@ -63,16 +63,11 @@ import ReactMarkdown from 'react-markdown';
 
 const MODEL_GROUPS = [
   {
-    label: 'GLM 系列',
+    label: '⭐ 常用推荐',
     models: [
+      { id: 'glm-5-plus', name: 'GLM 5 ⭐' },
       { id: 'glm-4-plus', name: 'GLM 4.7' },
       { id: 'glm-4-plus-thinking', name: 'GLM 4.7 Thinking' },
-      { id: 'glm-5-plus', name: 'GLM 5' },
-    ],
-  },
-  {
-    label: 'Kimi 系列',
-    models: [
       { id: 'moonshot-v1-128k', name: 'Kimi 2.5 (128K)' },
       { id: 'moonshot-v1-auto', name: 'Kimi 2.5 Auto' },
     ],
@@ -667,7 +662,7 @@ export function ChatView() {
               )}
             </div>
             <p className="text-center text-[10px] text-muted-foreground/60 mt-2">
-              Hermes Agent — GLM 4.7 · Kimi 2.5 · NVIDIA Nemotron. Press Enter to send, Shift+Enter for new line.
+              Hermes Agent — GLM 5 · Kimi 2.5 · NVIDIA Nemotron. Press Enter to send, Shift+Enter for new line.
             </p>
           </div>
         </div>
