@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/sessions/[id]
@@ -9,9 +8,6 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
   try {
     const { id } = await params;
     const { db } = await import("@/lib/db");
@@ -54,9 +50,6 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const { id } = await params;
     const { db } = await import("@/lib/db");

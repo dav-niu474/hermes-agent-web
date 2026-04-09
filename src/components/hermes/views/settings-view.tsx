@@ -60,7 +60,7 @@ export function SettingsView() {
   });
 
   const [modelSettings, setModelSettings] = useState({
-    defaultModel: 'nvidia/llama-3.1-nemotron-70b-instruct',
+    defaultModel: 'glm-4-plus',
     smartRouting: true,
     maxSimpleChars: 160,
     cheapModel: 'nvidia/deepseek-llama3.1-8b-instruct',
@@ -279,11 +279,13 @@ export function SettingsView() {
                       <Select value={modelSettings.defaultModel} onValueChange={(v) => setModelSettings({ ...modelSettings, defaultModel: v })}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="glm-4-plus">GLM 4.7 (Zhipu AI)</SelectItem>
+                          <SelectItem value="glm-4-plus-thinking">GLM 4.7 Thinking</SelectItem>
+                          <SelectItem value="glm-5-plus">GLM 5 (Zhipu AI)</SelectItem>
+                          <SelectItem value="moonshot-v1-128k">Kimi 2.5 (128K)</SelectItem>
                           <SelectItem value="nvidia/llama-3.1-nemotron-70b-instruct">Nemotron 70B (NVIDIA)</SelectItem>
                           <SelectItem value="nvidia/llama-3.1-nemotron-ultra-253b">Nemotron Ultra 253B (NVIDIA)</SelectItem>
                           <SelectItem value="meta/llama-3.1-405b-instruct">Llama 3.1 405B (Meta)</SelectItem>
-                          <SelectItem value="mistralai/mixtral-8x22b-instruct-v0.1">Mixtral 8x22B (Mistral)</SelectItem>
-                          <SelectItem value="nvidia/deepseek-llama3.1-8b-instruct">DeepSeek Llama 8B (NVIDIA)</SelectItem>
                           <SelectItem value="nvidia/nemotron-4-340b-instruct">Nemotron 4 340B (NVIDIA)</SelectItem>
                         </SelectContent>
                       </Select>

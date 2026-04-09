@@ -2,8 +2,5 @@
   "framework": "nextjs",
   "buildCommand": "npx prisma generate && next build",
   "installCommand": "npm install",
-  "regions": ["hkg1"],
-  "env": {
-    "DATABASE_URL": "file:./db/custom.db"
-  }
+  "regions": ["hkg1"]
 }

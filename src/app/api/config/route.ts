@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/config
  * Get all configuration as key-value pairs.
  */
 export async function GET() {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({});
-  }
   try {
     const { db } = await import("@/lib/db");
     const configs = await db.agentConfig.findMany();
@@ -29,9 +25,6 @@ export async function GET() {
  * Update a configuration value (upsert).
  */
 export async function PUT(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     const { key, value, label, group, description } = body;

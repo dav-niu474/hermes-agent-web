@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/sessions
  * List all chat sessions. Returns empty array when database is not configured.
  */
 export async function GET() {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json([]);
-  }
   try {
     const { db } = await import("@/lib/db");
     const sessions = await db.chatSession.findMany({
@@ -40,9 +36,6 @@ export async function GET() {
  * Create a new chat session.
  */
 export async function POST(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     const { title, model } = body;

@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/memory
  * List all memory entries. Returns empty array when database is not configured.
  */
 export async function GET(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json([]);
-  }
   try {
     const { searchParams } = new URL(request.url);
     const category = searchParams.get("category");
@@ -50,9 +46,6 @@ export async function GET(request: NextRequest) {
  * Create a new memory entry.
  */
 export async function POST(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     const { category, content, tags, source } = body;
@@ -90,9 +83,6 @@ export async function POST(request: NextRequest) {
  * Delete a memory entry by id.
  */
 export async function DELETE(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     if (!body.id) {

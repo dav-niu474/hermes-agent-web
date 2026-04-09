@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/cronjobs
  * List all cron jobs. Returns empty array when database is not configured.
  */
 export async function GET() {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json([]);
-  }
   try {
     const { db } = await import("@/lib/db");
     const jobs = await db.cronJob.findMany({ orderBy: { createdAt: "desc" } });
@@ -24,9 +20,6 @@ export async function GET() {
  * Create a new cron job.
  */
 export async function POST(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     const { name, schedule, task, isEnabled } = body;
@@ -58,9 +51,6 @@ export async function POST(request: NextRequest) {
  * Update a cron job.
  */
 export async function PUT(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     if (!body.id) {
@@ -90,9 +80,6 @@ export async function PUT(request: NextRequest) {
  * Delete a cron job by id.
  */
 export async function DELETE(request: NextRequest) {
-  if (!isDatabaseAvailable()) {
-    return NextResponse.json({ error: "Database not available" }, { status: 503 });
-  }
   try {
     const body = await request.json();
     if (!body.id) {

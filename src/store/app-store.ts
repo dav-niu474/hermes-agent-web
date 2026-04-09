@@ -91,7 +91,7 @@ export const useAppStore = create<AppState>((set) => ({
   hermesUrl: 'http://localhost:8642',
   setHermesUrl: (url) => set({ hermesUrl: url }),
 
-  selectedModel: 'nvidia/llama-3.1-nemotron-70b-instruct',
+  selectedModel: 'glm-4-plus',
   setSelectedModel: (model) => set({ selectedModel: model }),
   availableModels: [],
   setAvailableModels: (models) => set({ availableModels: models }),

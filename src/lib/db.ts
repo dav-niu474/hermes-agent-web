@@ -4,38 +4,23 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-/**
- * Database client with graceful fallback.
- * On Vercel (serverless), the local SQLite file is not available,
- * so we catch initialization errors and return a minimal fallback.
- */
-let _db: PrismaClient | null = null
-let _dbAvailable = true
+export const db =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error'] : [],
+  })
 
-try {
-  _db =
-    globalForPrisma.prisma ??
-    new PrismaClient({
-      log: process.env.NODE_ENV === 'development' ? ['error'] : [],
-    })
-
-  if (process.env.NODE_ENV !== 'production') {
-    globalForPrisma.prisma = _db
-  }
-} catch (err) {
-  console.warn('[DB] Failed to initialize Prisma client:', err)
-  _db = null
-  _dbAvailable = false
-}
-
-export const db = _db!
-
-export function isDatabaseAvailable(): boolean {
-  return _dbAvailable && _db !== null
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = db
 }
 
 /** Default NVIDIA API key */
 const DEFAULT_NVIDIA_API_KEY = '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'
+
+/** Get NVIDIA API key from env or default */
+export function getNvidiaApiKey(): string {
+  return process.env.NVIDIA_API_KEY || DEFAULT_NVIDIA_API_KEY
+}
 
 /** Track whether seeding has been attempted this process */
 let seeded = false
@@ -45,8 +30,6 @@ let seeded = false
  * Idempotent — safe to call multiple times.
  */
 export async function ensureNvidiaApiKey(): Promise<string> {
-  if (!isDatabaseAvailable()) return DEFAULT_NVIDIA_API_KEY
-
   if (seeded) {
     try {
       const existing = await db.agentConfig.findUnique({ where: { key: 'nvidia_api_key' } })
@@ -64,7 +47,7 @@ export async function ensureNvidiaApiKey(): Promise<string> {
         update: {},
         create: {
           key: 'nvidia_api_key',
-          value: DEFAULT_NVIDIA_API_KEY,
+          value: getNvidiaApiKey(),
           type: 'string',
           group: 'nvidia',
           label: 'NVIDIA API Key',
@@ -74,9 +57,9 @@ export async function ensureNvidiaApiKey(): Promise<string> {
       console.log('[DB] Initialized nvidia_api_key in AgentConfig')
     }
     seeded = true
-    return existing?.value || DEFAULT_NVIDIA_API_KEY
+    return existing?.value || getNvidiaApiKey()
   } catch {
     seeded = true
-    return DEFAULT_NVIDIA_API_KEY
+    return getNvidiaApiKey()
   }
 }
