@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/skills
- * List skills from DB. Supports ?category= and ?search= query params.
+ * List skills from DB. Returns empty array when database is not configured.
  */
 export async function GET(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json([]);
+  }
   try {
     const { searchParams } = new URL(request.url);
     const category = searchParams.get("category");
@@ -20,6 +23,7 @@ export async function GET(request: NextRequest) {
       ];
     }
 
+    const { db } = await import("@/lib/db");
     const skills = await db.skill.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: "desc" },
@@ -28,7 +32,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(skills);
   } catch (error) {
     console.error("[Skills API] GET error:", error);
-    return NextResponse.json({ error: "Failed to fetch skills" }, { status: 500 });
+    return NextResponse.json([]);
   }
 }
 
@@ -37,6 +41,9 @@ export async function GET(request: NextRequest) {
  * Create a new skill.
  */
 export async function POST(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     const { name, category, description, content, isBuiltin, isActive } = body;
@@ -45,6 +52,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
+    const { db } = await import("@/lib/db");
     const skill = await db.skill.create({
       data: {
         name: name.trim(),
@@ -59,7 +67,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(skill);
   } catch (error) {
     console.error("[Skills API] POST error:", error);
-    return NextResponse.json({ error: "Failed to create skill" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -68,6 +76,9 @@ export async function POST(request: NextRequest) {
  * Update a skill.
  */
 export async function PUT(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     if (!body.id) {
@@ -75,11 +86,12 @@ export async function PUT(request: NextRequest) {
     }
 
     const { id, ...data } = body;
+    const { db } = await import("@/lib/db");
     const skill = await db.skill.update({ where: { id }, data });
     return NextResponse.json(skill);
   } catch (error) {
     console.error("[Skills API] PUT error:", error);
-    return NextResponse.json({ error: "Failed to update skill" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -88,15 +100,19 @@ export async function PUT(request: NextRequest) {
  * Delete a skill by id.
  */
 export async function DELETE(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     if (!body.id) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
+    const { db } = await import("@/lib/db");
     await db.skill.delete({ where: { id: body.id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[Skills API] DELETE error:", error);
-    return NextResponse.json({ error: "Failed to delete skill" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }

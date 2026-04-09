@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/memory
- * List all memory entries. Supports ?category= and ?search= query params.
+ * List all memory entries. Returns empty array when database is not configured.
  */
 export async function GET(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json([]);
+  }
   try {
     const { searchParams } = new URL(request.url);
     const category = searchParams.get("category");
@@ -20,6 +23,7 @@ export async function GET(request: NextRequest) {
       ];
     }
 
+    const { db } = await import("@/lib/db");
     const memories = await db.memoryEntry.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: "desc" },
@@ -37,7 +41,7 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     console.error("[Memory API] GET error:", error);
-    return NextResponse.json({ error: "Failed to fetch memories" }, { status: 500 });
+    return NextResponse.json([]);
   }
 }
 
@@ -46,6 +50,9 @@ export async function GET(request: NextRequest) {
  * Create a new memory entry.
  */
 export async function POST(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     const { category, content, tags, source } = body;
@@ -54,6 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
 
+    const { db } = await import("@/lib/db");
     const memory = await db.memoryEntry.create({
       data: {
         category: category || "general",
@@ -73,7 +81,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[Memory API] POST error:", error);
-    return NextResponse.json({ error: "Failed to create memory" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -82,15 +90,19 @@ export async function POST(request: NextRequest) {
  * Delete a memory entry by id.
  */
 export async function DELETE(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     if (!body.id) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
+    const { db } = await import("@/lib/db");
     await db.memoryEntry.delete({ where: { id: body.id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[Memory API] DELETE error:", error);
-    return NextResponse.json({ error: "Failed to delete memory" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }

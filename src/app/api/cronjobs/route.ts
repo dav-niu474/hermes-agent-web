@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/cronjobs
- * List all cron jobs.
+ * List all cron jobs. Returns empty array when database is not configured.
  */
 export async function GET() {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json([]);
+  }
   try {
+    const { db } = await import("@/lib/db");
     const jobs = await db.cronJob.findMany({ orderBy: { createdAt: "desc" } });
     return NextResponse.json(jobs);
   } catch (error) {
     console.error("[CronJobs API] GET error:", error);
-    return NextResponse.json({ error: "Failed to fetch cron jobs" }, { status: 500 });
+    return NextResponse.json([]);
   }
 }
 
@@ -20,6 +24,9 @@ export async function GET() {
  * Create a new cron job.
  */
 export async function POST(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     const { name, schedule, task, isEnabled } = body;
@@ -28,6 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Name and task are required" }, { status: 400 });
     }
 
+    const { db } = await import("@/lib/db");
     const job = await db.cronJob.create({
       data: {
         name: name.trim(),
@@ -41,7 +49,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(job);
   } catch (error) {
     console.error("[CronJobs API] POST error:", error);
-    return NextResponse.json({ error: "Failed to create cron job" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -50,6 +58,9 @@ export async function POST(request: NextRequest) {
  * Update a cron job.
  */
 export async function PUT(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     if (!body.id) {
@@ -57,6 +68,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const { id, ...data } = body;
+    const { db } = await import("@/lib/db");
     const job = await db.cronJob.update({
       where: { id },
       data: {
@@ -69,7 +81,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json(job);
   } catch (error) {
     console.error("[CronJobs API] PUT error:", error);
-    return NextResponse.json({ error: "Failed to update cron job" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -78,15 +90,19 @@ export async function PUT(request: NextRequest) {
  * Delete a cron job by id.
  */
 export async function DELETE(request: NextRequest) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const body = await request.json();
     if (!body.id) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
+    const { db } = await import("@/lib/db");
     await db.cronJob.delete({ where: { id: body.id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[CronJobs API] DELETE error:", error);
-    return NextResponse.json({ error: "Failed to delete cron job" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }

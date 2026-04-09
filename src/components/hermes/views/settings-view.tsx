@@ -173,9 +173,8 @@ export function SettingsView() {
                         <Input
                           id="nvidia-key"
                           type={showApiKey ? 'text' : 'password'}
-                          defaultValue="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"
-                          onChange={(e) => setApiKey(e.target.value)}
                           placeholder="nvapi-..."
+                          onChange={(e) => setApiKey(e.target.value)}
                           className="pr-10 font-mono text-xs"
                         />
                         <Button

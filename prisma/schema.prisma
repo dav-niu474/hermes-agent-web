@@ -1,10 +1,10 @@
-generator client {
-  provider = "prisma-client-js"
+datasource db {
+  provider  = "sqlite"
+  url       = env("DATABASE_URL")
 }
 
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+generator client {
+  provider = "prisma-client-js"
 }
 
 model User {
@@ -29,11 +29,11 @@ model ChatSession {
 model ChatMessage {
   id        String   @id @default(cuid())
   sessionId String
-  role      String   // user, assistant, system, tool
+  role      String
   content   String
-  toolCalls String?  // JSON string for tool call data
+  toolCalls String?
   tokens    Int?
-  duration  Int?     // ms
+  duration  Int?
   createdAt DateTime @default(now())
   session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
@@ -42,7 +42,7 @@ model AgentConfig {
   id    String @id @default(cuid())
   key   String @unique
   value String
-  type  String @default("string") // string, number, boolean, json
+  type  String @default("string")
   group String @default("general")
   label String?
   description String?
@@ -54,9 +54,9 @@ model ToolUsage {
   id        String   @id @default(cuid())
   toolName  String
   sessionId String?
-  status    String   @default("success") // success, error, pending
-  input     String?  // JSON
-  output    String?  // JSON
+  status    String   @default("success")
+  input     String?
+  output    String?
   duration  Int?
   createdAt DateTime @default(now())
 }
@@ -70,7 +70,7 @@ model Skill {
   isBuiltin   Boolean  @default(false)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 model CronJob {
@@ -83,15 +83,15 @@ model CronJob {
   nextRunAt   DateTime?
   status      String   @default("active")
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 model MemoryEntry {
   id        String   @id @default(cuid())
   category  String   @default("general")
   content   String
-  tags      String?  // comma-separated
-  source    String?  // which session/conversation
+  tags      String?
+  source    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

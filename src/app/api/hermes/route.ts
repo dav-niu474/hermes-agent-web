@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDatabaseAvailable } from "@/lib/db";
 
 const DEFAULT_HERMES_URL = "http://localhost:8642";
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1";
@@ -70,6 +71,9 @@ export async function GET() {
 
 /** Fetch all AgentConfig entries as a key-value map */
 async function fetchAllConfigs(): Promise<Record<string, string>> {
+  if (!isDatabaseAvailable()) {
+    return {};
+  }
   try {
     const { db } = await import("@/lib/db");
     const configs = await db.agentConfig.findMany();

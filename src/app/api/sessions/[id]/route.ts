@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { isDatabaseAvailable } from "@/lib/db";
 
 /**
  * GET /api/sessions/[id]
@@ -9,8 +9,12 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
   try {
     const { id } = await params;
+    const { db } = await import("@/lib/db");
     const session = await db.chatSession.findUnique({
       where: { id },
       include: { messages: { orderBy: { createdAt: "asc" } } },
@@ -38,7 +42,7 @@ export async function GET(
     });
   } catch (error) {
     console.error("[Session API] GET error:", error);
-    return NextResponse.json({ error: "Failed to fetch session" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
@@ -50,12 +54,16 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!isDatabaseAvailable()) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
   try {
     const { id } = await params;
+    const { db } = await import("@/lib/db");
     await db.chatSession.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[Session API] DELETE error:", error);
-    return NextResponse.json({ error: "Failed to delete session" }, { status: 500 });
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }

@@ -4,13 +4,35 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
-  })
+/**
+ * Database client with graceful fallback.
+ * On Vercel (serverless), the local SQLite file is not available,
+ * so we catch initialization errors and return a minimal fallback.
+ */
+let _db: PrismaClient | null = null
+let _dbAvailable = true
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+try {
+  _db =
+    globalForPrisma.prisma ??
+    new PrismaClient({
+      log: process.env.NODE_ENV === 'development' ? ['error'] : [],
+    })
+
+  if (process.env.NODE_ENV !== 'production') {
+    globalForPrisma.prisma = _db
+  }
+} catch (err) {
+  console.warn('[DB] Failed to initialize Prisma client:', err)
+  _db = null
+  _dbAvailable = false
+}
+
+export const db = _db!
+
+export function isDatabaseAvailable(): boolean {
+  return _dbAvailable && _db !== null
+}
 
 /** Default NVIDIA API key */
 const DEFAULT_NVIDIA_API_KEY = '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'
@@ -23,9 +45,15 @@ let seeded = false
  * Idempotent — safe to call multiple times.
  */
 export async function ensureNvidiaApiKey(): Promise<string> {
+  if (!isDatabaseAvailable()) return DEFAULT_NVIDIA_API_KEY
+
   if (seeded) {
-    const existing = await db.agentConfig.findUnique({ where: { key: 'nvidia_api_key' } })
-    return existing?.value || DEFAULT_NVIDIA_API_KEY
+    try {
+      const existing = await db.agentConfig.findUnique({ where: { key: 'nvidia_api_key' } })
+      return existing?.value || DEFAULT_NVIDIA_API_KEY
+    } catch {
+      return DEFAULT_NVIDIA_API_KEY
+    }
   }
 
   try {
