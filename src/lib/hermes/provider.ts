@@ -152,7 +152,7 @@ abstract class BaseProvider implements Provider {
       apiKey: config.apiKey || "no-key-required",
       baseURL: config.baseUrl,
       defaultHeaders: this.defaultHeaders,
-      timeout: 120_000, // 2 minute default
+      timeout: 180_000, // 3 minute default (GLM reasoning models need longer)
       maxRetries: 2,
     };
 
@@ -451,9 +451,10 @@ abstract class BaseProvider implements Provider {
  * - meta/llama-3.3-70b-instruct
  * - meta/llama-3.1-405b-instruct
  * - nvidia/llama-3.1-nemotron-70b-instruct
+ * - nvidia/llama-3.3-nemotron-super-49b-v1
  * - mistralai/mixtral-8x22b-instruct-v0.1
- * - z-ai/glm-4.7 (GLM 4.7 on NIM — returns reasoning_content)
- * - z-ai/glm-5 (GLM 5 on NIM)
+ * - z-ai/glm4.7 (GLM 4.7 on NIM — returns reasoning_content)
+ * - z-ai/glm5 (GLM 5 on NIM)
  */
 export class NvidiaProvider extends BaseProvider {
   readonly name = "nvidia";

@@ -494,6 +494,121 @@ export function resolveBaseUrl(provider: string): string {
   }
 }
 
+// ─── Model → Provider Mapping ─────────────────────────────────────────────
+
+/**
+ * Maps known model IDs to their correct provider slugs.
+ * Used by getLLMConfig() to auto-detect the right provider when
+ * only a model name is given (no explicit provider override).
+ *
+ * Entries with a slash (e.g. "meta/llama-3.3-70b-instruct") are
+ * routed to the provider that hosts them.  Entries without a slash
+ * are well-known model families.
+ */
+const MODEL_PROVIDER_MAP: Record<string, string> = {
+  // ── NVIDIA NIM models ──
+  "meta/llama-3.3-70b-instruct": "nvidia",
+  "meta/llama-3.1-405b-instruct": "nvidia",
+  "meta/llama-3.1-8b-instruct": "nvidia",
+  "mistralai/mixtral-8x22b-instruct-v0.1": "nvidia",
+  "mistralai/mistral-large-instruct-2407": "nvidia",
+  "google/gemma-2-27b-it": "nvidia",
+  "google/gemma-2-9b-it": "nvidia",
+  "nvidia/nemotron-4-340b-instruct": "nvidia",
+  "nvidia/llama-3.1-nemotron-70b-instruct": "nvidia",
+  "nvidia/llama-3.1-nemotron-70b-reward": "nvidia",
+  "nvidia/llama-3.1-nemotron-ultra-253b": "nvidia",
+  "nvidia/llama3-70b-instruct": "nvidia",
+  "nvidia/llama3-8b-instruct": "nvidia",
+  "deepseek-ai/deepseek-r1": "nvidia",
+  "deepseek-ai/deepseek-r1-distill-llama-70b": "nvidia",
+  "qwen/qwen2.5-72b-instruct": "nvidia",
+  "qwen/qwq-32b": "nvidia",
+  "z-ai/glm4.7": "nvidia",
+  "z-ai/glm5": "nvidia",
+
+  // ── OpenAI models ──
+  "gpt-4o": "openai",
+  "gpt-4o-mini": "openai",
+  "gpt-4-turbo": "openai",
+  "gpt-4": "openai",
+  "gpt-3.5-turbo": "openai",
+  "o1-mini": "openai",
+  "o1": "openai",
+  "o3-mini": "openai",
+  "o3": "openai",
+  "o4-mini": "openai",
+
+  // ── Anthropic models ──
+  "claude-sonnet-4-20250514": "anthropic",
+  "claude-3-5-sonnet-20241022": "anthropic",
+  "claude-3-5-haiku-20241022": "anthropic",
+  "claude-3-opus-20240229": "anthropic",
+  "claude-3-sonnet-20240229": "anthropic",
+  "claude-3-haiku-20240307": "anthropic",
+
+  // ── Google Gemini models ──
+  "gemini-2.5-flash": "google",
+  "gemini-2.0-flash": "google",
+  "gemini-1.5-pro": "google",
+  "gemini-1.5-flash": "google",
+  "gemini-pro": "google",
+
+  // ── GLM / Z.AI models (direct) ──
+  "glm-4-plus": "glm",
+  "glm-4-0520": "glm",
+  "glm-4": "glm",
+  "glm-4-air": "glm",
+  "glm-4-airx": "glm",
+  "glm-4-flash": "glm",
+  "glm-4-long": "glm",
+  "glm-4.5-flash": "glm",
+  "glm-4v-plus": "glm",
+  "glm-4v": "glm",
+  "glm-z1-air": "glm",
+  "glm-z1-airx": "glm",
+  "glm-z1-flash": "glm",
+  "glm-z1-32b": "glm",
+
+  // ── OpenRouter models (prefixed with provider/) ──
+  "anthropic/claude-sonnet-4": "openrouter",
+  "openai/gpt-4o": "openrouter",
+  "google/gemini-2.0-flash-001": "openrouter",
+  "meta-llama/llama-3.1-70b-instruct": "openrouter",
+  "mistralai/mistral-large": "openrouter",
+};
+
+/**
+ * Auto-detect the provider slug from a model ID.
+ * Checks the explicit map first, then falls back to heuristic patterns.
+ */
+export function detectProviderFromModel(modelId: string): string | null {
+  // 1. Explicit map lookup
+  const mapped = MODEL_PROVIDER_MAP[modelId];
+  if (mapped) return mapped;
+
+  // 2. Heuristic: model IDs with known org prefixes
+  if (modelId.startsWith("meta/") || modelId.startsWith("nvidia/") ||
+      modelId.startsWith("mistralai/") || modelId.startsWith("google/") ||
+      modelId.startsWith("deepseek-ai/") || modelId.startsWith("qwen/") ||
+      modelId.startsWith("z-ai/")) {
+    return "nvidia";
+  }
+  if (modelId.startsWith("anthropic/")) return "openrouter";
+  if (modelId.startsWith("openai/")) return "openrouter";
+  if (modelId.startsWith("meta-llama/") || modelId.startsWith("mistralai/")) return "openrouter";
+
+  // 3. Known model name prefixes
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.startsWith("o3") || modelId.startsWith("o4")) {
+    return "openai";
+  }
+  if (modelId.startsWith("claude-")) return "anthropic";
+  if (modelId.startsWith("gemini-")) return "google";
+  if (modelId.startsWith("glm-") || modelId.startsWith("glmz")) return "glm";
+
+  return null;
+}
+
 // ─── LLM Config ────────────────────────────────────────────────────────────
 
 /**
@@ -511,10 +626,6 @@ export function getLLMConfig(overrideModel?: string, overrideProvider?: string):
   const config = loadConfig();
   const modelCfg = config.model as ModelConfig;
 
-  const provider = resolveProvider(overrideProvider);
-  const baseUrl = resolveBaseUrl(provider);
-  const apiKey = resolveApiKey(provider);
-
   // Model resolution:
   // 1. Explicit override
   // 2. Config default
@@ -525,6 +636,28 @@ export function getLLMConfig(overrideModel?: string, overrideProvider?: string):
   } else if (modelCfg?.default?.trim()) {
     model = modelCfg.default.trim();
   }
+
+  // Provider resolution — now model-aware:
+  // 1. Explicit provider override
+  // 2. Model → provider map lookup
+  // 3. Config file / env var / auto-detect
+  // 4. Fall back to "nvidia"
+  let provider: string;
+  if (overrideProvider?.trim() && overrideProvider !== "auto") {
+    provider = overrideProvider.trim().toLowerCase();
+  } else if (model) {
+    const detected = detectProviderFromModel(model);
+    if (detected) {
+      provider = detected;
+    } else {
+      provider = resolveProvider();
+    }
+  } else {
+    provider = resolveProvider();
+  }
+
+  const baseUrl = resolveBaseUrl(provider);
+  const apiKey = resolveApiKey(provider);
 
   // Provider-specific default models
   if (!model) {

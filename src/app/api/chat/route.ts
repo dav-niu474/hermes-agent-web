@@ -30,6 +30,7 @@ interface ChatRequest {
   sessionId?: string;
   stream?: boolean;
   model?: string;
+  provider?: string;
 }
 
 /** Generate a concise title from the first user message. */
@@ -165,10 +166,15 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Resolve LLM config ──
-    const requestModel = body.model && body.model.includes("/")
-      ? body.model
-      : undefined;
-    const llmConfig = getLLMConfig(requestModel);
+    // Pass both model and provider so the backend routes to the correct API.
+    // The getLLMConfig function auto-detects provider from model if not given.
+    const requestModel = body.model?.trim() || undefined;
+    const requestProvider = body.provider?.trim() || undefined;
+    const llmConfig = getLLMConfig(requestModel, requestProvider);
+    console.log(
+      `[Chat API] model=${llmConfig.model} provider=${llmConfig.provider}` +
+        ` baseUrl=${llmConfig.baseUrl} hasKey=${!!llmConfig.apiKey}`,
+    );
 
     // ── Resolve toolset tools ──
     const toolsetFilter = getToolsetFilter();
