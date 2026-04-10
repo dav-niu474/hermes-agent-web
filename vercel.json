@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npx prisma generate && next build",
-  "installCommand": "npm install",
+  "buildCommand": "bunx prisma generate && next build",
+  "installCommand": "bun install --no-save",
   "regions": ["hkg1"]
 }

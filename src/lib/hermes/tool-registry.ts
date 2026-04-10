@@ -1,5 +1,3 @@
-'use server';
-
 /**
  * Dynamic Tool Registry
  *

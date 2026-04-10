@@ -6,8 +6,6 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // Vercel serverless output
-  output: "standalone",
   // Allow cross-origin requests from preview domains
   allowedDevOrigins: [
     /\.space\.z\.ai$/,

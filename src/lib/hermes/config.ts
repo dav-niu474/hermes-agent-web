@@ -13,6 +13,27 @@ import { join } from "path";
 import { homedir } from "os";
 import * as yaml from "js-yaml";
 
+// Detect serverless/readonly environments (Vercel, etc.)
+const IS_SERVERLESS = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY;
+
+/** Safe wrapper around fs operations — no-ops in serverless environments. */
+function safeExistsSync(path: string): boolean {
+  if (IS_SERVERLESS) return false;
+  try { return existsSync(path); } catch { return false; }
+}
+function safeReadFileSync(path: string, encoding: string): string | undefined {
+  if (IS_SERVERLESS) return undefined;
+  try { return readFileSync(path, encoding as BufferEncoding); } catch { return undefined; }
+}
+function safeWriteFileSync(path: string, data: string): void {
+  if (IS_SERVERLESS) return;
+  try { writeFileSync(path, data, "utf-8"); } catch { /* ignore */ }
+}
+function safeMkdirSync(path: string, options?: { recursive?: boolean }): void {
+  if (IS_SERVERLESS) return;
+  try { mkdirSync(path, options); } catch { /* ignore */ }
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Shape of the `model` section in config.yaml. */
@@ -151,6 +172,7 @@ const PROVIDER_AUTO_ORDER = [
  * Reads HERMES_HOME env var, falls back to ~/.hermes.
  */
 export function getHermesHome(): string {
+  if (IS_SERVERLESS) return "/tmp/.hermes";
   return process.env.HERMES_HOME || join(homedir(), ".hermes");
 }
 
@@ -172,16 +194,13 @@ export function getEnvPath(): string {
  * Ensure ~/.hermes directory exists (idempotent).
  */
 export function ensureHermesHome(): void {
+  if (IS_SERVERLESS) return;
   const home = getHermesHome();
-  if (!existsSync(home)) {
-    mkdirSync(home, { recursive: true });
-  }
+  safeMkdirSync(home, { recursive: true });
   // Ensure subdirectories
   for (const subdir of ["sessions", "logs", "skills", "memory"]) {
     const p = join(home, subdir);
-    if (!existsSync(p)) {
-      mkdirSync(p, { recursive: true });
-    }
+    safeMkdirSync(p, { recursive: true });
   }
 }
 
@@ -272,9 +291,8 @@ export function loadConfig(forceReload = false): HermesConfig {
   let userConfig: Record<string, unknown> = {};
   const configPath = getConfigPath();
 
-  if (existsSync(configPath)) {
-    try {
-      const raw = readFileSync(configPath, "utf-8");
+  const raw = safeReadFileSync(configPath, "utf-8");
+  if (raw) {
       const parsed = yaml.load(raw) as Record<string, unknown> | undefined;
       if (parsed && typeof parsed === "object") {
         userConfig = parsed;
@@ -345,7 +363,7 @@ export function updateConfig(updates: Record<string, unknown>): HermesConfig {
       sortKeys: false,
     });
     ensureHermesHome();
-    writeFileSync(configPath, yamlStr, "utf-8");
+    safeWriteFileSync(configPath, yamlStr);
   } catch (err) {
     console.error("[hermes:config] Failed to write config:", err);
   }
