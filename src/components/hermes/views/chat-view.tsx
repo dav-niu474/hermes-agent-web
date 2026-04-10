@@ -497,12 +497,12 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1.5 text-xs font-normal px-2 h-7 max-w-[180px] text-muted-foreground hover:text-foreground"
+          className="gap-1 text-xs font-normal px-2 h-7 w-40 sm:w-48 text-muted-foreground hover:text-foreground overflow-hidden"
           disabled={disabled}
         >
-          <Cpu className="size-3 shrink-0" />
-          <span className="truncate">{selectedName}</span>
-          <ChevronDown className="size-2.5 shrink-0 opacity-50" />
+          <Cpu className="size-3.5 shrink-0" />
+          <span className="flex-1 min-w-0 truncate text-left">{selectedName}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0" align="start">
