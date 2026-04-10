@@ -610,3 +610,29 @@ Work Log:
 Stage Summary:
 - GLM 4.7 (`z-ai/glm-4.7`) and GLM 5 (`z-ai/glm-5`) now appear in the model selector under "NVIDIA NIM" group
 - Files modified: `src/components/hermes/views/chat-view.tsx`, `src/lib/hermes/provider.ts`
+
+---
+Task ID: fix-chat-scroll-redesign
+Agent: Main
+Task: Fix chat page scroll bug and redesign UI
+
+Work Log:
+- Diagnosed scroll issue: flex layout chain didn't properly constrain messages area height
+- Identified CSS `* { transition }` interfering with scroll performance
+- Rewrote app-shell.tsx: added min-h-0, relative positioning for proper child height
+- Rewrote chat-view.tsx with rock-solid scroll layout:
+  - Messages area uses absolute inset-0 positioning + flex-1 overflow-y-auto min-h-0
+  - Smart auto-scroll that pauses when user manually scrolls up
+  - ScrollToBottom FAB appears when scrolled up
+  - Proper mobile touch scrolling
+- Fixed globals.css: replaced `*` transition with element-specific selectors
+- Added touch-action: pan-y and -webkit-overflow-scrolling for mobile
+- UI improvements: cleaner message bubbles, timestamps, compact welcome screen
+- Pushed to GitHub and deployed to Vercel
+
+Stage Summary:
+- 3 files modified: app-shell.tsx, chat-view.tsx, globals.css
+- Scroll fix: absolute positioning + min-h-0 ensures overflow-y-auto works in flex
+- Mobile fix: touch-action and webkit-overflow-scrolling
+- Smart scroll: detects manual scroll, shows scroll-to-bottom button
+- Pushed as commit 42c1f19
