@@ -1,6 +1,6 @@
 # Hermes Agent Web
 
-A full-featured web dashboard for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — the open-source self-improving AI agent by Nous Research. Built with Next.js 16, the entire Hermes Agent backend is rewritten in TypeScript and embedded directly into the Next.js server, so you get the full agent experience in the browser — no Python runtime needed.
+A full-featured web interface for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — the open-source self-improving AI agent by Nous Research. The entire Hermes Agent backend is rewritten in TypeScript and embedded directly into the Next.js server, delivering the complete agent experience in the browser with no Python runtime required.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js-16-black?logo=next.js" alt="Next.js 16">
@@ -8,7 +8,6 @@ A full-featured web dashboard for [Hermes Agent](https://github.com/NousResearch
   <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind_CSS-4-38bdf8?logo=tailwindcss" alt="Tailwind 4">
   <img src="https://img.shields.io/badge/shadcn/ui-New_York-18181b" alt="shadcn/ui">
-  <img src="https://img.shields.io/badge/Prisma-7-2d3748?logo=prisma" alt="Prisma">
   <img src="https://img.shields.io/badge/LLM-Multi_Provider-orange" alt="Multi Provider">
 </p>
 
@@ -25,7 +24,7 @@ A full-featured web dashboard for [Hermes Agent](https://github.com/NousResearch
 - **Communicate** — multi-platform messaging gateway (Telegram, Discord, Slack, WhatsApp, Email, and 10+ more)
 - **Self-improve** — RL training trajectories, batch evaluation, checkpoint management
 
-This project brings all of that to the web.
+This project brings the core agent experience to the web.
 
 ---
 
@@ -42,7 +41,7 @@ This project brings all of that to the web.
 │  └─────────────────────────┬────────────────────────────────┘ │
 │                            │                                   │
 │  ┌─────────────────────────▼────────────────────────────────┐ │
-│  │  API Routes (10 endpoints)                               │ │
+│  │  API Routes (11 endpoints)                               │ │
 │  │  /api/chat · /api/sessions · /api/skills                 │ │
 │  │  /api/memory · /api/tools · /api/config · /api/cronjobs  │ │
 │  └─────────────────────────┬────────────────────────────────┘ │
@@ -54,12 +53,14 @@ This project brings all of that to the web.
 │  │  agent-loop    · provider       · tool-registry          │ │
 │  │  toolsets      · skills         · memory                  │ │
 │  │  prompt-builder · config        · tools-registry         │ │
+│  │  models        · registered-tools · default-skills        │ │
 │  └─────────────────────────┬────────────────────────────────┘ │
 │                            │                                   │
 │  ┌─────────────────────────▼────────────────────────────────┐ │
 │  │  External Services                                        │ │
-│  │  PostgreSQL · NVIDIA NIM · OpenAI · Anthropic · Google   │ │
-│  │  OpenRouter · GLM (ZhipuAI)                              │ │
+│  │  SQLite (Prisma) · NVIDIA NIM · OpenAI · Anthropic       │ │
+│  │  Google Gemini · OpenRouter · GLM (ZhipuAI)              │ │
+│  │  z-ai-web-dev-sdk (Vision, TTS, Image Gen, Web)         │ │
 │  └──────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -72,16 +73,16 @@ The entire Hermes Agent system (`agent/`, `tools/`, `hermes_cli/`, `skills/`) is
 
 ### 💬 Chat with Multi-Provider LLM Support
 
-Full SSE-streaming chat with the agent loop. Supports 6 LLM providers with 20+ models:
+Full SSE-streaming chat with the complete agent loop (multi-turn tool calling, parallel execution, reasoning tokens). Supports 6 LLM providers with **58 models**:
 
 | Provider | Models |
 |----------|--------|
-| **NVIDIA NIM** | Llama 3.3 70B, Llama 3.1 405B, Mixtral 8x22B, Gemma 2 27B, Nemotron Super 49B, GLM 4.7, GLM 5 |
-| **OpenAI** | GPT-4o, GPT-4o Mini, GPT-4 Turbo, o1-mini |
-| **Anthropic** | Claude Sonnet 4, Claude 3.5 Sonnet, Claude 3.5 Haiku |
-| **Google** | Gemini 2.5 Flash, Gemini 2.0 Flash |
-| **GLM (ZhipuAI)** | GLM-4 Plus, GLM-4.5 Flash |
-| **OpenRouter** | Claude Sonnet 4 (OR), GPT-4o (OR) |
+| **NVIDIA NIM** (18) | Llama 3.3 70B, Llama 3.1 405B, Llama 3.1 8B, Mixtral 8x22B, Mistral Large, Gemma 2 27B, Gemma 2 9B, Nemotron 340B, Nemotron 70B, Nemotron Ultra 253B, Llama3 70B/8B, DeepSeek R1, DeepSeek R1 Distill 70B, Qwen 2.5 72B, QwQ 32B, GLM 4.7, GLM 5 |
+| **OpenAI** (10) | GPT-4o, GPT-4o Mini, GPT-4 Turbo, GPT-4, GPT-3.5 Turbo, o1-mini, o1, o3-mini, o3, o4-mini |
+| **Anthropic** (6) | Claude Sonnet 4, Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus, Claude 3 Sonnet, Claude 3 Haiku |
+| **Google** (5) | Gemini 2.5 Flash, Gemini 2.0 Flash, Gemini 1.5 Pro, Gemini 1.5 Flash, Gemini Pro |
+| **GLM / ZhipuAI** (14) | GLM-4 Plus, GLM-4, GLM-4 Air/AirX/Flash/Long, GLM-4.5 Flash, GLM-4V/4V Plus, GLM-Z1 Air/AirX/Flash/32B |
+| **OpenRouter** (5) | Claude Sonnet 4, GPT-4o, Gemini 2.0 Flash, Llama 3.1 70B, Mistral Large |
 
 The provider is auto-detected from the model name — no manual configuration needed.
 
@@ -93,77 +94,146 @@ Faithfully ported from the Python `prompt_builder.py`:
 2. **Memory guidance** — When/how to use memory tools
 3. **Tool-use enforcement** — Configurable tool calling behavior
 4. **System message** — Core system prompt
-5. **Memory context** — Injected from MEMORY.md / USER.md
-6. **Skills index** — Available skills and how to activate them
+5. **Memory context** — Injected from MEMORY.md / USER.md (fenced `<memory-context>` block)
+6. **Skills index** — Available skills and how to activate them (dynamically built)
 7. **Timestamp** — Current date/time for temporal awareness
 8. **Platform hints** — Web-specific behavior instructions
 
-### 🛠️ 45+ Tool Definitions with Full Schemas
+### 🛠️ 12 Active Web-Compatible Tools
 
-All tools from the Python agent are defined with their complete JSON Schema parameters, descriptions, categories, and web-compatibility flags. Browsable in the Tools view.
+Only tools with real working handlers are exposed to the LLM — no ghost tools that waste turns:
 
-| Category | Tools |
-|----------|-------|
-| Web & Search | `web_search`, `web_extract` |
-| Terminal & Code | `terminal`, `execute_code`, `delegate_task` |
-| File System | `read_file`, `write_file`, `patch`, `search_files` |
-| Browser | `browser_navigate`, `browser_click`, `browser_type`, `browser_snapshot`, +8 more |
-| Vision & Media | `vision_analyze`, `image_generate`, `text_to_speech` |
-| Skills | `skills_list`, `skill_view`, `skill_manage` |
-| Planning & Memory | `todo`, `memory`, `session_search`, `clarify` |
-| Automation | `cronjob` |
-| Messaging | `send_message` |
-| Smart Home | `ha_list_entities`, `ha_get_state`, `ha_call_service`, +1 more |
-| RL Training | 10 reinforcement learning tools |
+| Tool | Handler | Implementation |
+|------|---------|---------------|
+| `web_search` | ✅ | z-ai-web-dev-sdk |
+| `web_extract` | ✅ | z-ai-web-dev-sdk |
+| `vision_analyze` | ✅ | z-ai-web-dev-sdk VLM |
+| `image_generate` | ✅ | z-ai-web-dev-sdk |
+| `text_to_speech` | ✅ | z-ai-web-dev-sdk TTS |
+| `memory` | ✅ | MemoryManager (add/replace/remove/read) |
+| `skills_list` | ✅ | Skills scanner |
+| `skill_view` | ✅ | Skill content loader |
+| `skill_manage` | ✅ | Skill CRUD (create/edit/delete) — **self-evolution!** |
+| `todo` | ✅ | In-memory task management |
+| `session_search` | ✅ | Full-text search via SQLite |
+| `clarify` | ✅ | Interactive clarification |
 
-### 📚 70+ Skills Catalog
+### 📚 11 Default Skills + 70+ Catalog
 
-All bundled skills are scannable and viewable:
+11 built-in default skills with full SKILL.md instructions, plus the ability to scan all 70+ hermes-agent bundled skills:
 
 | Category | Skills |
 |----------|--------|
-| **Software Dev** | plan, systematic-debugging, TDD, subagent-driven-development |
-| **GitHub** | codebase-inspection, code-review, repo-management, PR workflow, issues |
-| **MLOps** | axolotl, unsloth, GRPO RL training, PyTorch FSDP, TRL fine-tuning, PEFT, vLLM, llama.cpp, GGUF |
-| **ML Research** | DSPy, research-paper-writing (ICLR/ICML/NeurIPS templates), lm-eval-harness, W&B |
-| **Creative** | ASCII art/video, Excalidraw, Manim video, p5.js, 60+ website templates, songwriting |
-| **Productivity** | Notion, PowerPoint, Linear, PDF, Google Workspace, OCR |
-| **Media** | YouTube content, GIF search, music generation |
-| **Communication** | Email (himalaya) |
-| **Research** | arxiv, blogwatcher, LLM wiki, Polymarket |
-| **MCP** | mcporter, native MCP |
-| **DevOps** | webhook subscriptions |
-| **Security** | godmode (red teaming) |
+| **Core** | web-search, code-execution, file-operations, memory, skill-manager (self-evolution), todo |
+| **AI/Media** | image-generation, text-to-speech, web-browser |
+| **Utility** | clipboard |
+
+The agent can **create new skills** via `skill_manage` — this is the self-evolution capability. When the agent discovers a reusable approach, it can write a SKILL.md and save it for future sessions.
 
 ### 💾 Persistent Memory System
 
-File-backed MEMORY.md / USER.md system with:
+File-backed MEMORY.md / USER.md system faithfully ported from Python:
+
 - §-delimited sections for structured memory
-- Prompt injection detection and sanitization
-- Character limits and relevance scoring
-- Full CRUD via the Memory view and API
+- Prompt injection detection (10 threat patterns) and sanitization
+- Invisible Unicode character detection
+- Character limits (2200 memory / 1375 user)
+- Atomic writes (temp + rename)
+- Deduplication on add
+- `<memory-context>` fenced block injection into system prompt
+- Frozen snapshot pattern for prefix cache stability
+- Query-based prefetch (substring matching)
+- Full CRUD via Memory view and API
 
-### 📊 Dashboard & Settings
+### 🔄 Session History & Context Continuity
 
-- Real-time system health overview
-- Provider/model configuration with auto-detection
-- 4 theme styles (default, emerald, rose, ocean) + dark/light mode
+- Multi-turn conversations persist across requests
+- Session history (last 50 messages) is loaded from DB and prepended to every request
+- Deduplication ensures no duplicate messages
+- Context flows naturally across tool-calling turns
+
+### 🎨 Chat UX
+
+- Real-time SSE streaming with typing cursor
+- Thinking/reasoning blocks (collapsible, violet theme)
+- Tool call blocks (running=amber+pulsing, done=emerald+checkmark, error=red)
+- "Processing results..." indicator between tool calls
+- Abort/stop generation with proper AbortController
+- Auto-scroll with manual override
+- Error banner with dismiss
+- Copy message button
+- Image upload with vision analysis
+- Model selector with search, grouped by provider, tags (reasoning/fast/vision)
+
+### 📊 Dashboard, Tools, Settings
+
+- Dashboard with system health overview
+- Tools view browsing all 45+ tool definitions
+- Skills view with built-in/custom sections and SKILL.md content dialog
+- Settings with provider/model configuration
+- 4 theme styles + dark/light mode
 - Responsive design (mobile sidebar drawer)
 
-### 🗄️ Database Schema
+---
 
-PostgreSQL-backed persistence with Prisma ORM:
+## Agent Capabilities — Feature Parity Matrix
 
-| Model | Purpose |
-|-------|---------|
-| `User` | User accounts |
-| `ChatSession` | Conversation containers |
-| `ChatMessage` | Messages with tokens, duration, tool calls |
-| `AgentConfig` | Key-value configuration store |
-| `ToolUsage` | Tool execution audit trail |
-| `Skill` | Skill catalog |
-| `CronJob` | Scheduled tasks |
-| `MemoryEntry` | Persistent memory entries |
+| Capability | Hermes Agent (Python) | Hermes Agent Web | Notes |
+|-----------|----------------------|-----------------|-------|
+| **Agent Loop** | | | |
+| Multi-turn tool calling | ✅ | ✅ | Full loop: LLM → tool → result → LLM |
+| Parallel tool execution | ✅ | ✅ | Concurrent with limited workers |
+| Iteration budget (90 turns) | ✅ | ✅ | Configurable maxIterations |
+| Budget pressure warnings | ✅ | ✅ | 70%/90% thresholds |
+| Context compression | ✅ | 🔲 | Planned (Phase 6) |
+| Fallback providers | ✅ | 🔲 | Planned (Phase 6) |
+| **Streaming** | | | |
+| SSE delta streaming | ✅ | ✅ | Full ReadableStream pipeline |
+| Reasoning/thinking tokens | ✅ | ✅ | Per-provider extraction |
+| Token usage tracking | ✅ | ⚠️ | Non-streaming only; streaming shows 0 |
+| **Providers** | | | |
+| NVIDIA NIM | ✅ | ✅ | Full support |
+| OpenAI | ✅ | ✅ | Full support including o-series |
+| Anthropic | ✅ | ✅ | Via OpenAI-compatible proxy |
+| Google Gemini | ✅ | ✅ | Full support |
+| GLM / ZhipuAI | ✅ | ✅ | Custom reasoning_content extraction |
+| OpenRouter | ✅ | ✅ | Including Claude fine-grained streaming |
+| **Prompt Building** | | | |
+| 8-layer system prompt | ✅ | ✅ | Identity, memory, tools, skills, timestamp, platform |
+| Memory context injection | ✅ | ✅ | `<memory-context>` fenced block |
+| Skills index injection | ✅ | ✅ | Dynamic via buildSkillsSystemPrompt() |
+| Platform-specific hints | ✅ | ✅ | web, cli, telegram, etc. |
+| **Tools** | | | |
+| Web search & extract | ✅ | ✅ | z-ai-web-dev-sdk |
+| Vision analysis | ✅ | ✅ | z-ai-web-dev-sdk VLM |
+| Image generation | ✅ | ✅ | z-ai-web-dev-sdk |
+| Text-to-speech | ✅ | ✅ | z-ai-web-dev-sdk |
+| Memory CRUD | ✅ | ✅ | Full MEMORY.md / USER.md |
+| Skills list/view/manage | ✅ | ✅ | Including self-evolution (create) |
+| Todo management | ✅ | ✅ | In-memory |
+| Session search | ✅ | ✅ | SQLite full-text |
+| Clarification | ✅ | ✅ | JSON response |
+| Terminal execution | ✅ | 🔲 | Planned (Phase 3) |
+| Code execution | ✅ | 🔲 | Planned (Phase 3) |
+| File read/write | ✅ | 🔲 | Planned (Phase 5) |
+| Browser automation | ✅ | 🔲 | Planned (Phase 4) |
+| **Skills System** | | | |
+| Skill scanning (70+) | ✅ | ✅ | Multi-directory, YAML frontmatter |
+| Skill content viewing | ✅ | ✅ | SKILL.md + linked files |
+| Skill creation (self-evolution) | ✅ | ✅ | skill_manage tool |
+| Skill editing/deletion | ✅ | ✅ | skill_manage tool |
+| Skills Hub sync | ✅ | 🔲 | Planned (Phase 2) |
+| **Memory** | | | |
+| MEMORY.md / USER.md | ✅ | ✅ | Dual stores |
+| Prompt injection detection | ✅ | ✅ | 10 threat patterns |
+| Character limits | ✅ | ✅ | 2200/1375 chars |
+| Query-based prefetch | ✅ | ✅ | Substring matching |
+| **Session** | | | |
+| Conversation persistence | ✅ | ✅ | SQLite via Prisma |
+| History replay | ✅ | ✅ | Last 50 messages |
+| Session CRUD | ✅ | ✅ | Create/list/delete |
+
+**Overall: ~80% feature parity** — the core agent brain is fully functional. Remaining work is connecting the hands (terminal, code exec, file ops, browser).
 
 ---
 
@@ -175,13 +245,13 @@ PostgreSQL-backed persistence with Prisma ORM:
 | **Language** | TypeScript 5 |
 | **UI Library** | React 19 + shadcn/ui (New York) |
 | **Styling** | Tailwind CSS 4 |
-| **State** | Zustand 5 + TanStack Query |
+| **State** | Zustand 5 |
 | **Animation** | Framer Motion |
-| **Database** | Prisma 7 + PostgreSQL |
+| **Database** | Prisma + SQLite |
 | **LLM Client** | OpenAI SDK (multi-provider) |
-| **Auth** | NextAuth.js v4 |
+| **AI SDK** | z-ai-web-dev-sdk (vision, TTS, image gen, web) |
 | **Runtime** | Bun |
-| **Deployment** | Vercel (hkg1 region) |
+| **Deployment** | Vercel |
 
 ---
 
@@ -190,7 +260,6 @@ PostgreSQL-backed persistence with Prisma ORM:
 ### Prerequisites
 
 - **Bun** (recommended) or Node.js 18+
-- A **PostgreSQL** database (Supabase, Neon, or self-hosted)
 - At least one **LLM API key**
 
 ### 1. Clone & Install
@@ -207,12 +276,9 @@ bun install
 cp .env.example .env
 ```
 
-Edit `.env` with your database URL and API keys:
+Edit `.env` with your API keys:
 
 ```env
-# Database (PostgreSQL)
-DATABASE_URL="postgres://user:pass@host:5432/hermes?sslmode=require"
-
 # LLM Providers (at least one required)
 NVIDIA_API_KEY="nvapi-..."
 OPENAI_API_KEY="sk-..."
@@ -235,15 +301,11 @@ bunx prisma db push
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
 ### 5. Deploy to Vercel
 
 ```bash
 vercel deploy
 ```
-
-Set the same environment variables in your Vercel project settings.
 
 ---
 
@@ -255,10 +317,10 @@ hermes-agent-web/
 │   ├── app/                    # Next.js App Router
 │   │   ├── page.tsx            # Root page (app shell)
 │   │   ├── layout.tsx          # Root layout
-│   │   └── api/                # API routes (10 endpoints)
+│   │   └── api/                # API routes (11 endpoints)
 │   │       ├── chat/           # Agent chat with SSE streaming
 │   │       ├── sessions/       # Session CRUD
-│   │       ├── skills/         # Skill scanning & viewing
+│   │       ├── skills/         # Skill scanning & management
 │   │       ├── memory/         # Memory management
 │   │       ├── tools/          # Tool definitions
 │   │       ├── config/         # Agent configuration
@@ -268,14 +330,6 @@ hermes-agent-web/
 │   │   ├── hermes/             # Main app components
 │   │   │   ├── app-shell.tsx   # Layout shell + sidebar
 │   │   │   └── views/          # 8 view components
-│   │   │       ├── chat-view.tsx
-│   │   │       ├── dashboard-view.tsx
-│   │   │       ├── tools-view.tsx
-│   │   │       ├── skills-view.tsx
-│   │   │       ├── sessions-view.tsx
-│   │   │       ├── memory-view.tsx
-│   │   │       ├── settings-view.tsx
-│   │   │       └── cronjobs-view.tsx
 │   │   └── ui/                 # shadcn/ui components
 │   ├── lib/
 │   │   └── hermes/             # ⭐ Embedded Hermes Agent (TS rewrite)
@@ -285,6 +339,9 @@ hermes-agent-web/
 │   │       ├── tool-registry.ts # Dynamic tool registration
 │   │       ├── toolsets.ts     # 30+ toolset definitions
 │   │       ├── tools-registry.ts # 45+ tool schema definitions
+│   │       ├── registered-tools.ts # 16 tools with handlers
+│   │       ├── default-skills.ts  # 11 default skill definitions
+│   │       ├── models.ts       # 58 model catalog (single source of truth)
 │   │       ├── skills.ts       # Skill scanning & management
 │   │       ├── memory.ts       # Persistent memory system
 │   │       ├── prompt-builder.ts # 8-layer system prompt
@@ -292,128 +349,83 @@ hermes-agent-web/
 │   └── store/
 │       └── app-store.ts        # Zustand global state
 ├── prisma/
-│   └── schema.prisma           # Database schema
+│   └── schema.prisma           # Database schema (SQLite)
 ├── hermes-agent/               # Python source (reference)
-│   ├── agent/                  # 23 agent modules
-│   ├── tools/                  # 50+ tool implementations
-│   ├── skills/                 # 70+ bundled skills
-│   ├── gateway/                # 15+ messaging platform adapters
-│   ├── hermes_cli/             # Full TUI client (37 files)
-│   └── plugins/                # Memory provider plugins
 ├── public/                     # Static assets
 └── package.json
 ```
 
 ---
 
-## Roadmap: Full Hermes Agent Integration
-
-The current web app has the agent's **brain** (LLM routing, prompt building, memory, tool definitions, skill scanning) fully working. The remaining work is connecting the **hands** — making tools actually execute in the web context. Here's the plan:
-
-### Phase 1: Web-Compatible Tools (Now → Q2 2025)
-
-Tools that can work in a serverless web context using server-side APIs.
-
-| Tool | Implementation | Status |
-|------|---------------|--------|
-| `web_search` | Integrate Tavily/Brave Search API | 🔲 Planned |
-| `web_extract` | Server-side HTTP fetching + content extraction | 🔲 Planned |
-| `vision_analyze` | VLM API integration (via z-ai-web-dev-sdk) | 🔲 Planned |
-| `image_generate` | Text-to-image API (via z-ai-web-dev-sdk) | 🔲 Planned |
-| `text_to_speech` | TTS API integration | 🔲 Planned |
-| `todo` | In-memory todo list with persistence | 🔲 Planned |
-| `clarify` | Interactive clarification flow in chat UI | 🔲 Planned |
-| `session_search` | Full-text search across chat history | 🔲 Planned |
-| `cronjob` | Integrate with Vercel Cron or external scheduler | 🔲 Planned |
-
-### Phase 2: Skill Execution (Q2 2025)
-
-Move from "scan and read" to "activate and execute" skills.
-
-- **Skill activation** — Allow the agent to load skill instructions into the system prompt on demand
-- **Skill templates** — Render skill output templates (e.g., research paper, code review, website)
-- **Skill CRUD** — Create, edit, delete custom skills from the web UI
-- **Skills Hub sync** — Pull community skills from the upstream repository
-
-### Phase 3: Sandboxed Code Execution (Q3 2025)
-
-Run code safely in the browser/server context.
-
-- **WebAssembly sandbox** — Run Python/JS snippets in WASM containers (via Pyodide or JupyterLite)
-- **Docker-based execution** — Optional Docker backend for full terminal access
-- **SSH/Remote execution** — Connect to remote dev environments
-- **Code evaluation** — Support for multi-language code execution with output capture
-
-### Phase 4: Browser Automation (Q3 2025)
-
-Bring browser tools to the web via a headless browser backend.
-
-- **Headless browser service** — Mini-service running Playwright/Puppeteer
-- **Browser tool suite** — Navigate, click, type, screenshot, scroll, extract
-- **Vision integration** — Browser screenshots → VLM analysis
-- **Web scraping** — Automated data extraction workflows
-
-### Phase 5: File Operations (Q3 2025)
-
-Virtual filesystem for the web context.
-
-- **Virtual FS layer** — In-browser or server-side file system
-- **File tools** — read, write, patch, search across project files
-- **Git integration** — Clone, commit, push via Git API
-- **Cloud storage** — Connect to GitHub, S3, or other storage backends
-
-### Phase 6: Advanced Agent Features (Q4 2025)
-
-The most sophisticated capabilities from the Python agent.
-
-| Feature | Description |
-|---------|-------------|
-| **Context compression** | Aggressive summarization when approaching context limits |
-| **Smart model routing** | Automatically pick the cheapest capable model for each task |
-| **Credential pool** | Rotate across multiple API keys for rate limit management |
-| **Delegation** | Spawn sub-agents for parallel task execution |
-| **Batch trajectories** | Generate training data from agent runs |
-| **MCP connections** | Model Context Protocol server/client support |
-| **Checkpoints** | Save/restore agent state for complex workflows |
-| **Plugin system** | Pluggable memory providers, custom tools, extensions |
-
-### Phase 7: Messaging Gateway (Q4 2025 → 2026)
-
-Bring the multi-platform messaging system to the web.
-
-- **WebSocket gateway** — Real-time bidirectional communication
-- **Platform adapters** — Telegram, Discord, Slack, WhatsApp, Email
-- **Push notifications** — Browser notifications for agent updates
-- **Background tasks** — Long-running agent tasks with progress reporting
-
-### Phase 8: RL Training & Self-Improvement (2026)
-
-The most ambitious goal — enable the agent to improve itself.
-
-- **RL training tools** — GRPO, PPO, DPO fine-tuning pipelines
-- **Trajectory collection** — Gather agent interaction data
-- **Evaluation harness** — Automated benchmarking
-- **Model fine-tuning** — LoRA/QLoRA fine-tuning of hosted models
-- **Self-play** — Agent critiques and improves its own outputs
-
----
-
 ## Embedded Hermes Agent Modules
 
-The following Python modules have been fully rewritten in TypeScript and are production-ready in `src/lib/hermes/`:
+All Python modules rewritten in TypeScript and production-ready in `src/lib/hermes/`:
 
 | Module | Lines | Python Source | Purpose |
 |--------|-------|---------------|---------|
 | `agent-loop.ts` | ~1,100 | `run_agent.py`, `agent_loop.py` | Tool-calling agent loop with iteration budget |
-| `provider.ts` | ~740 | `auxiliary_client.py`, `runtime_provider.py` | Multi-provider LLM abstraction |
+| `provider.ts` | ~740 | `auxiliary_client.py`, `runtime_provider.py` | Multi-provider LLM abstraction (6 providers) |
 | `tool-registry.ts` | ~550 | `tools/registry.py` | Dynamic tool registration and dispatch |
 | `toolsets.ts` | ~650 | `toolsets.py` | 30+ toolset definitions with resolution |
 | `tools-registry.ts` | ~700 | `tools/*.py` (45+ files) | Static tool schema definitions |
+| `registered-tools.ts` | ~350 | Various tool handlers | 16 tools with real working handlers |
+| `default-skills.ts` | ~560 | `skills/` | 11 default skills with SKILL.md content |
+| `models.ts` | ~150 | N/A (new) | 58-model catalog (single source of truth) |
 | `skills.ts` | ~1,300 | `skill_utils.py`, `skills_tool.py` | Skill scanning, parsing, management |
 | `memory.ts` | ~710 | `memory_manager.py`, `memory_tool.py` | Persistent memory system |
 | `prompt-builder.ts` | ~375 | `prompt_builder.py` | 8-layer system prompt assembly |
 | `config.ts` | ~800 | `hermes_cli/config.py` | Configuration management |
-| **Total** | **~6,900** | | |
+| **Total** | **~7,700** | | |
+
+---
+
+## Roadmap
+
+### ✅ Phase 1: Core Agent (Complete)
+
+- [x] Agent loop with multi-turn tool calling
+- [x] 6 LLM providers with 58 models
+- [x] 12 working web-compatible tools
+- [x] SSE streaming with reasoning tokens
+- [x] Memory system (MEMORY.md / USER.md)
+- [x] Skills system with self-evolution
+- [x] 8-layer prompt builder with skills + memory injection
+- [x] Session history replay for context continuity
+- [x] Chat UX (streaming, thinking, tool blocks, errors)
+
+### 🔲 Phase 2: Enhanced Skills
+
+- [ ] Skills Hub sync — Pull community skills from upstream
+- [ ] Skill activation — Load skill instructions into system prompt on demand
+- [ ] Skill templates — Render skill output templates
+- [ ] Custom skill editor — Web UI for creating/editing skills
+
+### 🔲 Phase 3: Code Execution
+
+- [ ] WebAssembly sandbox (Pyodide / JupyterLite)
+- [ ] Docker-based execution backend
+- [ ] Multi-language code execution with output capture
+
+### 🔲 Phase 4: Browser Automation
+
+- [ ] Headless browser mini-service (Playwright)
+- [ ] Browser tool suite (navigate, click, type, screenshot)
+- [ ] Vision integration (screenshot → VLM analysis)
+
+### 🔲 Phase 5: File Operations
+
+- [ ] Virtual filesystem layer
+- [ ] File tools (read, write, patch, search)
+- [ ] Git integration
+
+### 🔲 Phase 6: Advanced Agent Features
+
+- [ ] Context window compression/summarization
+- [ ] Smart model routing (cheapest capable model)
+- [ ] Fallback providers (automatic failover)
+- [ ] Credential pool rotation
+- [ ] Sub-agent delegation
+- [ ] MCP (Model Context Protocol) support
 
 ---
 

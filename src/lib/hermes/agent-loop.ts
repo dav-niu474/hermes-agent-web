@@ -44,6 +44,8 @@ export interface AgentConfig {
   maxTokens?: number;
   /** Session ID for tracking */
   sessionId?: string;
+  /** Skills system prompt block to inject */
+  skillsPrompt?: string;
 }
 
 export interface ToolCall {
@@ -584,6 +586,7 @@ export class AgentLoop {
       soulMd: this.config.systemPrompt,
       sessionId: this.config.sessionId,
       provider: this.config.provider,
+      skillsPrompt: this.config.skillsPrompt,
     });
   }
 

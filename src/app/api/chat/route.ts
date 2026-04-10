@@ -47,6 +47,8 @@ function generateTitle(content: string): string {
 // Web-compatible tools
 // ---------------------------------------------------------------------------
 
+// Only these tools have real working handlers in the web context.
+// The LLM will ONLY receive schemas for these tools — no ghost tools.
 const WEB_COMPATIBLE_TOOLS = new Set([
   "web_search",
   "web_extract",
@@ -55,7 +57,9 @@ const WEB_COMPATIBLE_TOOLS = new Set([
   "text_to_speech",
   "skills_list",
   "skill_view",
+  "skill_manage",
   "memory",
+  "todo",
   "session_search",
   "clarify",
 ]);
@@ -83,7 +87,8 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
   private toolSchemas: OpenAI.ChatCompletionTool[];
 
   constructor(toolNames: string[]) {
-    this.toolNames = new Set(toolNames);
+    // Only include tools that are actually executable in the web context
+    this.toolNames = new Set(toolNames.filter((n) => WEB_COMPATIBLE_TOOLS.has(n)));
     this.toolSchemas = ALL_TOOLS
       .filter((t) => this.toolNames.has(t.name))
       .map((t) => ({
@@ -94,6 +99,7 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
           parameters: t.parameters as Record<string, unknown>,
         },
       }));
+    console.log(`[ToolRegistry] ${this.toolSchemas.length} web-compatible tools: ${[...this.toolNames].join(", ")}`);
   }
 
   getToolDefinitions(): OpenAI.ChatCompletionTool[] {
@@ -474,18 +480,9 @@ class MemoryManagerAdapter implements MemoryManagerInterface {
     this.mm = mm;
   }
 
-  async getMemoryContext(_query?: string): Promise<string> {
+  async getMemoryContext(query?: string): Promise<string> {
     try {
-      const data = await this.mm.readMemory();
-      // Build a compact memory context for the system prompt
-      const parts: string[] = [];
-      if (data.memoryContent?.trim()) {
-        parts.push(`## Agent Memory\n${data.memoryContent}`);
-      }
-      if (data.userContent?.trim()) {
-        parts.push(`## User Profile\n${data.userContent}`);
-      }
-      return parts.join("\n\n");
+      return await this.mm.buildMemoryContextBlock(query);
     } catch {
       return "";
     }
@@ -603,6 +600,15 @@ export async function POST(request: NextRequest) {
     const memoryManager = new MemoryManager();
     const memoryAdapter = new MemoryManagerAdapter(memoryManager);
 
+    // ── Load skills system prompt ──
+    let skillsPrompt = "";
+    try {
+      const skills = await scanSkills({});
+      skillsPrompt = buildSkillsSystemPrompt(skills);
+    } catch (err) {
+      console.warn("[Chat API] Failed to build skills prompt:", err);
+    }
+
     // ── Agent config ──
     const agentConfig: AgentConfig = {
       model: llmConfig.model,
@@ -612,15 +618,53 @@ export async function POST(request: NextRequest) {
       platform: "web",
       maxIterations: 90,
       sessionId: localSessionId,
+      skillsPrompt,
     };
 
     const agentLoop = new AgentLoop(agentConfig, toolRegistry, memoryAdapter);
 
-    // ── Convert messages ──
-    const agentMessages: AgentMessage[] = body.messages.map((m) => ({
-      role: m.role as AgentMessage["role"],
-      content: m.content,
-    }));
+    // ── Load session history for context continuity ──
+    let sessionHistory: { role: string; content: string }[] = [];
+    if (localSessionId) {
+      try {
+        const pastMessages = await db.chatMessage
+          .findMany({
+            where: { sessionId: localSessionId },
+            orderBy: { createdAt: "asc" },
+            take: 50, // last 50 messages for context
+            select: { role: true, content: true },
+          })
+          .catch(() => []);
+        sessionHistory = pastMessages.map((m) => ({
+          role: m.role,
+          content: m.content || "",
+        }));
+      } catch {
+        // Ignore DB errors
+      }
+    }
+
+    // ── Convert messages — prepend session history for full context ──
+    const agentMessages: AgentMessage[] = [
+      ...sessionHistory.map((m) => ({
+        role: m.role as AgentMessage["role"],
+        content: m.content,
+      })),
+      ...body.messages.map((m) => ({
+        role: m.role as AgentMessage["role"],
+        content: m.content,
+      })),
+    ];
+
+    // Deduplicate: remove the last user message if it already exists in history
+    // (the frontend sends it again as the current message)
+    const lastUserContent = body.messages.filter((m) => m.role === "user").pop()?.content;
+    if (lastUserContent && sessionHistory.length > 0) {
+      const lastHistIdx = agentMessages.length - body.messages.length - 1;
+      if (lastHistIdx >= 0 && agentMessages[lastHistIdx]?.content === lastUserContent) {
+        agentMessages.splice(lastHistIdx, 1);
+      }
+    }
 
     // ── Save user message locally ──
     if (localSessionId) {
