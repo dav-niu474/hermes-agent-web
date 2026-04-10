@@ -1,5 +1,3 @@
-'use server';
-
 /**
  * Hermes Skills System — TypeScript port of hermes-agent's skill utilities.
  *

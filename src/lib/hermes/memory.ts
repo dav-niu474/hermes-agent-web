@@ -1,5 +1,3 @@
-'use server';
-
 /**
  * Hermes Memory System — TypeScript port of hermes-agent's memory manager.
  *

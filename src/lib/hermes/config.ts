@@ -293,6 +293,7 @@ export function loadConfig(forceReload = false): HermesConfig {
 
   const raw = safeReadFileSync(configPath, "utf-8");
   if (raw) {
+    try {
       const parsed = yaml.load(raw) as Record<string, unknown> | undefined;
       if (parsed && typeof parsed === "object") {
         userConfig = parsed;
