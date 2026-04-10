@@ -567,3 +567,28 @@ The hermes-agent core system has been **completely rewritten in TypeScript** (7,
 - Persistent memory with prompt injection detection
 - Complete system prompt builder (8 layers)
 
+
+---
+Task ID: 11
+Agent: Main Agent
+Task: Fix frontend bugs — chat scroll, session deletion, model selector
+
+Work Log:
+- Analyzed chat-view.tsx layout: found the scroll issue was caused by app-shell.tsx wrapping children in `overflow-y-auto`, causing the entire ChatView (including input) to scroll together
+- Fixed app-shell.tsx: changed `overflow-y-auto` to `overflow-hidden` so each view handles its own scrolling
+- Fixed dashboard-view.tsx: added its own `overflow-y-auto custom-scrollbar` wrapper to maintain scrollability
+- Verified tools-view, skills-view, sessions-view, settings-view, memory-view, cronjobs-view all already have their own ScrollArea/overflow handling
+- Rewrote chat-view.tsx with three improvements:
+  1. Chat input area stays fixed at bottom (already structurally correct, now confirmed working with overflow fix)
+  2. Session deletion: replaced `window.confirm()` with AlertDialog + Sonner toast notifications
+  3. Model selector: added Popover-based model selector in chat header with 18 models across 6 providers (NVIDIA NIM, OpenAI, Anthropic, Google, GLM, OpenRouter)
+- Added model groups definition with search, provider grouping, and selection persistence via Zustand store
+- Chat API now sends `model` parameter to backend so the selected model is used
+- Session loading now restores the model from the session data
+- Dev server compiles successfully (GET / 200), ESLint zero new errors in src/
+
+Stage Summary:
+- Files modified: `src/components/hermes/app-shell.tsx`, `src/components/hermes/views/dashboard-view.tsx`, `src/components/hermes/views/chat-view.tsx`
+- Bug 1 (input scrolling): FIXED — overflow containment moved from app-shell to individual views
+- Bug 2 (session deletion): FIXED — AlertDialog confirmation + toast feedback
+- Bug 3 (model selector): FIXED — 18 models across 6 providers in searchable popover
