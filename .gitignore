@@ -52,3 +52,17 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Database files
+*.db
+*.db-journal
+prisma/db/
+
+# Sandbox/system files
+.accesslog
+.config
+.stats
+.zscripts/
+
+# Caddy
+Caddyfile
