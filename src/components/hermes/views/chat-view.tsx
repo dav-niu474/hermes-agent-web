@@ -704,7 +704,7 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
           <ChevronDown className="size-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
+      <PopoverContent className="w-72 p-0 overflow-hidden" align="start">
         <div className="p-2 border-b border-border/60">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -726,22 +726,34 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
                 {group.models.map((model) => {
                   const isSelected = model.id === selectedModel;
                   return (
-                    <button
+                    <div
                       key={model.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         onSelectModel(model.id);
                         setOpen(false);
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectModel(model.id);
+                          setOpen(false);
+                        }
+                      }}
                       className={cn(
-                        'w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center gap-2',
+                        'w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center gap-2 min-w-0 overflow-hidden',
                         isSelected
                           ? 'bg-accent text-accent-foreground'
-                          : 'text-foreground hover:bg-muted/60'
+                          : 'text-foreground hover:bg-muted/60 cursor-pointer'
                       )}
                     >
-                      <span className="font-medium truncate">{model.name}</span>
+                      <span className="font-medium truncate min-w-0">{model.name}</span>
+                      {model.description && (
+                        <span className="text-[10px] text-muted-foreground/60 truncate hidden sm:inline">{model.description}</span>
+                      )}
                       {isSelected && <Check className="size-3 shrink-0 text-primary ml-auto" />}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
