@@ -22,6 +22,8 @@ export interface ChatMessage {
   reasoning: string;
   /** Tool calls tracked during this message's generation. */
   toolCallEntries: ToolCallEntry[];
+  /** Attached image data URL (for user messages with image uploads). */
+  imageUrl?: string;
   tokens?: number;
   duration?: number;
   createdAt?: Date;

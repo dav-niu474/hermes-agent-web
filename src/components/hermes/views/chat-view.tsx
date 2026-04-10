@@ -31,6 +31,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Terminal,
+  X,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -420,7 +421,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             )}
           >
             {isUser ? (
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <>
+                {message.imageUrl && (
+                  <img
+                    src={message.imageUrl}
+                    alt="Uploaded"
+                    className="max-w-[240px] max-h-[200px] rounded-lg mb-2 object-contain"
+                  />
+                )}
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              </>
             ) : (
               <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
                 <ReactMarkdown>{message.content || ' '}</ReactMarkdown>
@@ -840,9 +850,12 @@ export function ChatView() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [input, setInput] = useState('');
   const [loadingSession, setLoadingSession] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const isAutoScrollRef = useRef(true);
 
@@ -966,14 +979,48 @@ export function ChatView() {
     }
   }, [currentSessionId, clearMessages, setCurrentSessionId]);
 
+  // ── Handle image file selection ──
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image must be less than 10MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    // Reset the input so the same file can be re-selected
+    e.target.value = '';
+  }, []);
+
+  const clearImagePreview = useCallback(() => {
+    setImagePreview(null);
+  }, []);
+
   // ── Send message ──
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
+    if ((!trimmed && !imagePreview) || isStreaming) return;
 
+    const attachedImage = imagePreview;
     setInput('');
+    setImagePreview(null);
+    setStreamError(null);
     isAutoScrollRef.current = true;
-    addChatMessage({ id: `msg-${Date.now()}`, role: 'user', content: trimmed, createdAt: new Date() });
+    addChatMessage({
+      id: `msg-${Date.now()}`,
+      role: 'user',
+      content: trimmed || '(Image)',
+      imageUrl: attachedImage || undefined,
+      createdAt: new Date(),
+    });
     addChatMessage({ id: `msg-${Date.now()}-resp`, role: 'assistant', content: '', isStreaming: true, createdAt: new Date() });
     setIsStreaming(true);
 
@@ -985,7 +1032,11 @@ export function ChatView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...chatMessages, { role: 'user', content: trimmed }].map((m) => ({ role: m.role, content: m.content })),
+          messages: [...chatMessages, { role: 'user', content: trimmed || '(Image)', image_url: attachedImage || undefined }].map((m) => ({
+            role: m.role,
+            content: m.content,
+            ...(m.image_url ? { image_url: m.image_url } : {}),
+          })),
           sessionId: currentSessionId || undefined,
           stream: true,
           model: effectiveModel,
@@ -1060,6 +1111,12 @@ export function ChatView() {
                 }
                 break;
               }
+              case 'error': {
+                const errMsg = parsed['x-error'] || 'An unknown error occurred';
+                console.error('[SSE] Stream error:', errMsg);
+                setStreamError(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
+                break;
+              }
               case 'content':
               default: {
                 // Regular content delta
@@ -1084,8 +1141,10 @@ export function ChatView() {
       );
     } finally {
       setIsStreaming(false);
+      // Clear stream error after a short delay so user can see it
+      setTimeout(() => setStreamError(null), 8000);
     }
-  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, addChatMessage, updateLastAssistantMessage, appendReasoning, upsertToolCall, completeToolCall, setIsStreaming, setCurrentSessionId, fetchSessions]);
+  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, imagePreview, addChatMessage, updateLastAssistantMessage, appendReasoning, upsertToolCall, completeToolCall, setIsStreaming, setCurrentSessionId, fetchSessions]);
 
   const handleStop = () => {
     abortRef.current?.abort();
@@ -1210,13 +1269,26 @@ export function ChatView() {
         <div className="shrink-0 border-t border-border/50 bg-background/90 backdrop-blur-sm px-3 sm:px-4 py-3">
           <div className="max-w-3xl mx-auto">
             <div className="relative flex items-end gap-1.5 rounded-2xl border border-border/60 bg-card/80 p-1.5 focus-within:ring-2 focus-within:ring-ring/40 focus-within:border-border transition-all">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageSelect}
+                className="hidden"
+              />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-8 rounded-xl text-muted-foreground hover:text-foreground shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 rounded-xl text-muted-foreground hover:text-foreground shrink-0"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isStreaming}
+                  >
                     <Paperclip className="size-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Attach files</TooltipContent>
+                <TooltipContent>Upload image</TooltipContent>
               </Tooltip>
 
               <Textarea
@@ -1244,11 +1316,53 @@ export function ChatView() {
                   <Square className="size-3" />
                 </Button>
               ) : (
-                <Button size="icon" className="size-8 rounded-xl shrink-0" onClick={handleSend} disabled={!input.trim()}>
+                <Button size="icon" className="size-8 rounded-xl shrink-0" onClick={handleSend} disabled={!input.trim() && !imagePreview}>
                   <Send className="size-3.5" />
                 </Button>
               )}
             </div>
+            <AnimatePresence>
+              {imagePreview && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex items-center gap-2 mb-2 p-1.5 rounded-xl bg-muted/50 border border-border/40">
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="size-12 rounded-lg object-cover shrink-0"
+                    />
+                    <span className="text-xs text-muted-foreground truncate flex-1">Image attached</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 shrink-0"
+                      onClick={clearImagePreview}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {streamError && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mb-2"
+                >
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-50/80 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/20">
+                    <AlertCircle className="size-3.5 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700 dark:text-red-300 leading-relaxed">{streamError}</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <p className="text-center text-[10px] text-muted-foreground/40 mt-1.5 select-none">
               Hermes Agent &middot; Enter to send, Shift+Enter for new line
             </p>

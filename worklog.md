@@ -680,3 +680,90 @@ Stage Summary:
 - Description text added as secondary info (hidden on mobile)
 - PopoverContent has overflow-hidden to prevent boundary overflow
 - All model names stay within component boundaries
+
+---
+Task ID: 3
+Agent: main
+Task: Implement real tool dispatch handlers for web-compatible tools
+
+Work Log:
+- Replaced stub ToolRegistryAdapter.dispatch() with real implementations for 10 web-compatible tools
+- Added z-ai-web-dev-sdk lazy singleton (getZAI()) with dynamic import for backend-only usage
+- Implemented handleWebSearch(): uses zai.functions.invoke('web_search'), formats results with numbered markdown
+- Implemented handleWebExtract(): iterates URLs (max 5), uses zai.functions.invoke('page_reader') per URL, returns markdown content
+- Implemented handleVisionAnalyze(): uses zai.chat.completions.createVision() with image_url + question, returns analysis text
+- Implemented handleImageGenerate(): uses zai.images.generations.create() with aspect ratio mapping, returns base64 data URL
+- Implemented handleTextToSpeech(): uses zai.audio.tts.create() with 1024 char truncation, returns base64 audio data URL
+- Implemented handleSkillsList(): uses scanSkills() from hermes skills module with optional category filter
+- Implemented handleSkillView(): uses getSkillContent() from hermes skills module, returns content + linked files
+- Implemented handleMemory(): full CRUD via MemoryManager (read/append/replace/remove), supports memory and user targets
+- Implemented handleSessionSearch(): queries Prisma db.chatMessage.findMany with contains search, returns 10 most recent
+- Implemented handleClarify(): returns clarificationNeeded JSON placeholder
+- Non-web-compatible tools still return descriptive placeholder
+- All tool handlers wrapped in try/catch with meaningful error messages
+- Added scanSkills and getSkillContent imports from @/lib/hermes
+- Fixed lint warnings: removed unused eslint-disable directives, used proper type assertions instead of any
+
+Stage Summary:
+- All 10 web-compatible tools now have real implementations
+- Tools use z-ai-web-dev-sdk for AI capabilities (search, vision, image gen, TTS)
+- Database queries for session search via Prisma
+- Hermes modules for memory and skills management
+- Zero new lint errors in the modified file
+---
+Task ID: 4
+Agent: main
+Task: Connect frontend views to real backend APIs
+
+Work Log:
+- Created /api/stats endpoint that aggregates dashboard stats from DB (totalSessions, totalMessages, totalTokens, sessionsToday, messagesToday, recentSessions)
+- Added POST handler to /api/skills for create/edit/delete skill operations using manageSkill()
+- Rewrote dashboard-view.tsx to fetch from /api/stats on mount with useEffect
+  - TotalSessionsCard, MessagesTodayCard, TokensUsedCard now show real data
+  - RecentSessionsTable shows real sessions from DB with relative time formatting
+  - Charts replaced with placeholder states noting historical tracking not yet available
+  - Added loading skeletons, error states, and refresh button
+- Rewrote tools-view.tsx to fetch from /api/tools endpoint
+  - Categories dynamically built from API response (using CATEGORIES metadata)
+  - Tool cards show emoji, parameters, web-compatibility status
+  - Server-side filtering via query params (category, search) with 300ms debounce
+  - Client-side search fallback for instant feedback
+  - Loading skeleton grid, error state with retry button
+- Rewrote skills-view.tsx to fetch from /api/skills endpoint
+  - Categories dynamically built from API response categories list
+  - Skill cards show tags, platforms, builtin/custom badge, active status
+  - Create skill calls POST /api/skills with action=create
+  - Edit skill calls POST /api/skills with action=edit
+  - Delete skill calls POST /api/skills with action=delete (with confirm)
+  - Loading skeleton grid, error state with retry button
+
+Stage Summary:
+- Dashboard, Tools, Skills views now use real API data instead of hardcoded mocks
+- Loading states (skeleton cards) added for each view during data fetch
+- Error handling with fallback UI and retry buttons
+- All visual layouts preserved - same card grids, category pills, search, dialogs
+- No new lint errors introduced (5 pre-existing errors in other files unchanged)
+
+---
+Task ID: 5
+Agent: main
+Task: Add image upload and in-stream error display to chat
+
+Work Log:
+- Added image upload via Paperclip icon with hidden file input (accept="image/*")
+- Image preview thumbnail shown above textarea when image is selected
+- Image sent as base64 data URL alongside text in chat messages
+- Added imageUrl field to ChatMessage interface in app-store
+- Backend handles image_url in user messages: runs vision_analyze via z-ai-web-dev-sdk, prepends analysis to content
+- MessageBubble renders images from imageUrl field in user messages
+- Added dedicated error event handling in SSE parser (case 'error')
+- Stream errors displayed as red-tinted banner with AlertCircle icon below input area
+- Error banner auto-clears after 8 seconds and when new message is sent
+- Send button enabled when either text or image is present
+
+Stage Summary:
+- Chat supports image upload with preview thumbnail
+- Vision models analyze uploaded images via z-ai-web-dev-sdk
+- Streaming errors shown as animated red banners
+- Files modified: src/store/app-store.ts, src/components/hermes/views/chat-view.tsx, src/app/api/chat/route.ts
+- Zero lint errors in modified files

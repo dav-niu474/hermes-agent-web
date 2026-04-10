@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -23,6 +23,8 @@ import {
   Sparkles,
   Inbox,
   CircleDot,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import {
   Card,
@@ -32,6 +34,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import {
   Table,
@@ -41,84 +44,33 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useAppStore } from '@/store/app-store';
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-} from 'recharts';
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 
 /* ═══════════════════════════════════════════
-   MOCK DATA
+   API TYPES
    ═══════════════════════════════════════════ */
 
-const activityData = [
-  { day: 'Mon', messages: 24, tokens: 4500 },
-  { day: 'Tue', messages: 38, tokens: 7200 },
-  { day: 'Wed', messages: 15, tokens: 3100 },
-  { day: 'Thu', messages: 52, tokens: 9800 },
-  { day: 'Fri', messages: 41, tokens: 7600 },
-  { day: 'Sat', messages: 28, tokens: 5200 },
-  { day: 'Sun', messages: 33, tokens: 6100 },
-];
-
-const toolUsage = [
-  { name: 'Web Search', count: 142, color: 'bg-emerald-500' },
-  { name: 'Code Exec', count: 98, color: 'bg-amber-500' },
-  { name: 'File Read', count: 87, color: 'bg-rose-500' },
-  { name: 'DB Query', count: 64, color: 'bg-cyan-500' },
-  { name: 'API Call', count: 53, color: 'bg-orange-500' },
-];
-
-const mockSessions = [
-  {
-    id: 's1',
-    title: 'Building REST API with authentication',
-    model: 'GPT-4o',
-    messages: 42,
-    lastActive: '2 min ago',
-    status: 'active' as const,
-  },
-  {
-    id: 's2',
-    title: 'Database schema optimization',
-    model: 'Claude 3.5',
-    messages: 28,
-    lastActive: '1 hour ago',
-    status: 'active' as const,
-  },
-  {
-    id: 's3',
-    title: 'React component refactoring',
-    model: 'GPT-4o',
-    messages: 63,
-    lastActive: '3 hours ago',
-    status: 'archived' as const,
-  },
-  {
-    id: 's4',
-    title: 'CI/CD pipeline setup',
-    model: 'Claude 3.5',
-    messages: 15,
-    lastActive: 'Yesterday',
-    status: 'archived' as const,
-  },
-  {
-    id: 's5',
-    title: 'Performance debugging',
-    model: 'GPT-4o',
-    messages: 31,
-    lastActive: '2 days ago',
-    status: 'archived' as const,
-  },
-];
+interface ApiStats {
+  totalSessions: number;
+  totalMessages: number;
+  totalTokens: number;
+  sessionsToday: number;
+  messagesToday: number;
+  recentSessions: {
+    id: string;
+    title: string;
+    model: string;
+    messageCount: number;
+    updatedAt: string;
+    createdAt: string;
+  }[];
+}
 
 /* ═══════════════════════════════════════════
    ANIMATION UTILITIES
@@ -168,6 +120,41 @@ function useCountUp(target: number, duration = 1200, enabled = true) {
     requestAnimationFrame(tick);
   }, [target, duration, enabled]);
   return value;
+}
+
+/** Format a date string to relative time */
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 60) return 'Just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffHour < 24) return `${diffHour} hour${diffHour > 1 ? 's' : ''} ago`;
+  if (diffDay === 1) return 'Yesterday';
+  return `${diffDay} days ago`;
+}
+
+/* ═══════════════════════════════════════════
+   LOADING SKELETON
+   ═══════════════════════════════════════════ */
+
+function SkeletonCard() {
+  return (
+    <Card className="h-full">
+      <CardContent className="p-5">
+        <div className="space-y-3 animate-pulse">
+          <div className="h-4 bg-muted rounded w-24" />
+          <div className="h-8 bg-muted rounded w-16" />
+          <div className="h-5 bg-muted rounded w-20" />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 /* ═══════════════════════════════════════════
@@ -339,11 +326,8 @@ function AgentStatusCard() {
   );
 }
 
-function TotalSessionsCard() {
-  const sessions = useAppStore((s) => s.chatSessions);
-  const total = sessions.length || 24;
-  const todayCount = 3;
-  const displayTotal = useCountUp(total);
+function TotalSessionsCard({ total, todayCount, loading }: { total: number; todayCount: number; loading: boolean }) {
+  const displayTotal = useCountUp(total, 1200, !loading);
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
@@ -352,7 +336,11 @@ function TotalSessionsCard() {
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Total Sessions</p>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
+              {loading ? (
+                <div className="h-8 w-12 bg-muted rounded animate-pulse" />
+              ) : (
+                <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
+              )}
             </div>
             <div className="flex items-center gap-1.5">
               <Badge variant="secondary" className="text-xs gap-1">
@@ -370,34 +358,24 @@ function TotalSessionsCard() {
   );
 }
 
-function MessagesTodayCard() {
-  const total = 42;
-  const yesterday = 35;
-  const delta = Math.round(((total - yesterday) / yesterday) * 100);
-  const displayTotal = useCountUp(total);
-  const isUp = delta > 0;
+function MessagesTodayCard({ total, loading }: { total: number; loading: boolean }) {
+  const displayTotal = useCountUp(total, 1200, !loading);
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
       <Card className="h-full hover:shadow-md transition-shadow duration-200">
         <CardContent className="p-5 flex items-start justify-between">
           <div className="space-y-3">
-            <p className="text-sm font-medium text-muted-foreground">Messages Today</p>
+            <p className="text-sm font-medium text-muted-foreground">Total Messages</p>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
-              <span className="text-sm text-muted-foreground">/ {yesterday} yesterday</span>
+              {loading ? (
+                <div className="h-8 w-12 bg-muted rounded animate-pulse" />
+              ) : (
+                <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
+              )}
             </div>
             <div className="flex items-center gap-1.5">
-              <span
-                className={cn(
-                  'inline-flex items-center gap-0.5 text-xs font-medium',
-                  isUp ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
-                )}
-              >
-                {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                {isUp ? '+' : ''}{delta}%
-              </span>
-              <span className="text-xs text-muted-foreground">vs yesterday</span>
+              <span className="text-xs text-muted-foreground">Across all sessions</span>
             </div>
           </div>
           <div className="p-2.5 rounded-xl bg-chart-1/15">
@@ -409,37 +387,32 @@ function MessagesTodayCard() {
   );
 }
 
-function ToolsUsedCard() {
-  const maxCount = Math.max(...toolUsage.map((t) => t.count));
-  const totalTools = toolUsage.reduce((acc, t) => acc + t.count, 0);
-  const displayTotal = useCountUp(totalTools);
+function TokensUsedCard({ total, loading }: { total: number; loading: boolean }) {
+  const displayTotal = useCountUp(total, 1200, !loading);
+  const formatted = total >= 1000000
+    ? `${(total / 1000000).toFixed(1)}M`
+    : total >= 1000
+      ? `${(total / 1000).toFixed(1)}k`
+      : String(total);
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
       <Card className="h-full hover:shadow-md transition-shadow duration-200">
         <CardContent className="p-5 flex items-start justify-between">
-          <div className="space-y-3 flex-1 min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Tools Used</p>
-            <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
-            <div className="space-y-1.5">
-              {toolUsage.slice(0, 3).map((tool) => (
-                <div key={tool.name} className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground w-16 truncate">
-                    {tool.name}
-                  </span>
-                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                    <motion.div
-                      className={cn('h-full rounded-full', tool.color)}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(tool.count / maxCount) * 100}%` }}
-                      transition={{ duration: 0.8, delay: 0.4, ease: 'easeOut' }}
-                    />
-                  </div>
-                  <span className="text-[11px] text-muted-foreground w-6 text-right">
-                    {tool.count}
-                  </span>
-                </div>
-              ))}
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-muted-foreground">Tokens Used</p>
+            <div className="flex items-baseline gap-2">
+              {loading ? (
+                <div className="h-8 w-12 bg-muted rounded animate-pulse" />
+              ) : (
+                <>
+                  <span className="text-3xl font-bold tracking-tight">{displayTotal >= 1000 ? formatted : displayTotal}</span>
+                  {total < 1000 && <span className="text-sm text-muted-foreground">tokens</span>}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Cumulative usage</span>
             </div>
           </div>
           <div className="p-2.5 rounded-xl bg-chart-2/15">
@@ -452,16 +425,10 @@ function ToolsUsedCard() {
 }
 
 /* ═══════════════════════════════════════════
-   ACTIVITY CHART
+   ACTIVITY CHART — Placeholder (no historical tracking)
    ═══════════════════════════════════════════ */
 
 function ActivityChartCard() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-
   return (
     <motion.div variants={itemVariants}>
       <Card className="h-full hover:shadow-md transition-shadow duration-200">
@@ -480,52 +447,14 @@ function ActivityChartCard() {
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="h-[220px]">
-            <AnimatePresence>
-              {mounted && (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={activityData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="msgGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="hsl(var(--chart-1))" stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
-                    <XAxis
-                      dataKey="day"
-                      tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        color: 'hsl(var(--foreground))',
-                      }}
-                      labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="messages"
-                      stroke="hsl(var(--chart-1))"
-                      strokeWidth={2}
-                      fill="url(#msgGradient)"
-                      animationDuration={1200}
-                      animationEasing="ease-out"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </AnimatePresence>
+          <div className="h-[220px] flex flex-col items-center justify-center text-center">
+            <div className="p-3 rounded-full bg-muted/50 mb-3">
+              <BarChart3 className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-muted-foreground">Historical chart data</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              Daily activity tracking will appear here as you use the agent over time.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -653,17 +582,10 @@ function SystemResourcesCard() {
    RECENT SESSIONS TABLE
    ═══════════════════════════════════════════ */
 
-function RecentSessionsTable() {
-  const sessions = useAppStore((s) => s.chatSessions);
+function RecentSessionsTable({ sessions, loading, onRefresh }: { sessions: ApiStats['recentSessions']; loading: boolean; onRefresh: () => void }) {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
   const hasSessions = sessions.length > 0;
-  const displaySessions = hasSessions ? sessions.slice(0, 5).map((s, i) => ({
-    ...s,
-    messages: Math.floor(Math.random() * 50) + 5,
-    lastActive: i === 0 ? '2 min ago' : i === 1 ? '1 hour ago' : `${i + 1} days ago`,
-    status: i < 2 ? ('active' as const) : ('archived' as const),
-  })) : mockSessions;
 
   return (
     <motion.div variants={itemVariants}>
@@ -677,75 +599,103 @@ function RecentSessionsTable() {
               </CardTitle>
               <CardDescription>Your latest conversation sessions</CardDescription>
             </div>
-            {hasSessions && (
-              <button
-                onClick={() => setCurrentView('sessions')}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-              >
-                View all <ArrowRight className="w-3 h-3" />
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRefresh} disabled={loading}>
+                    <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh</TooltipContent>
+              </Tooltip>
+              {hasSessions && (
+                <button
+                  onClick={() => setCurrentView('sessions')}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                >
+                  View all <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="px-0 pb-0">
           <div className="max-h-96 overflow-y-auto custom-scrollbar">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-6">Title</TableHead>
-                  <TableHead className="hidden sm:table-cell">Model</TableHead>
-                  <TableHead className="hidden md:table-cell">Messages</TableHead>
-                  <TableHead className="hidden lg:table-cell">Last Active</TableHead>
-                  <TableHead className="pr-6">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {displaySessions.map((session) => (
-                  <TableRow
-                    key={session.id}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      setCurrentSessionId(session.id);
-                      setCurrentView('chat');
-                    }}
-                  >
-                    <TableCell className="pl-6">
-                      <div className="flex items-center gap-2 max-w-[200px]">
-                        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate font-medium text-sm">
-                          {session.title}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <Badge variant="secondary" className="text-xs font-normal">
-                        {session.model}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <span className="text-sm text-muted-foreground">{session.messages}</span>
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <span className="text-sm text-muted-foreground">{session.lastActive}</span>
-                    </TableCell>
-                    <TableCell className="pr-6">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          session.status === 'active'
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400'
-                            : 'border-border text-muted-foreground'
-                        )}
-                      >
-                        <CircleDot className="w-2.5 h-2.5" />
-                        {session.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+            {loading ? (
+              <div className="p-6 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="animate-pulse flex items-center gap-4 px-6">
+                    <div className="h-4 bg-muted rounded flex-1" />
+                    <div className="h-5 bg-muted rounded w-16" />
+                    <div className="h-4 bg-muted rounded w-8" />
+                    <div className="h-5 bg-muted rounded w-20" />
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : !hasSessions ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+                <div className="p-3 rounded-full bg-muted/50 mb-3">
+                  <MessageSquare className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium text-muted-foreground">No sessions yet</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  Start a chat to see your sessions here
+                </p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-6">Title</TableHead>
+                    <TableHead className="hidden sm:table-cell">Model</TableHead>
+                    <TableHead className="hidden md:table-cell">Messages</TableHead>
+                    <TableHead className="hidden lg:table-cell">Last Active</TableHead>
+                    <TableHead className="pr-6">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sessions.slice(0, 8).map((session) => (
+                    <TableRow
+                      key={session.id}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        setCurrentSessionId(session.id);
+                        setCurrentView('chat');
+                      }}
+                    >
+                      <TableCell className="pl-6">
+                        <div className="flex items-center gap-2 max-w-[200px]">
+                          <MessageSquare className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <span className="truncate font-medium text-sm">
+                            {session.title}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        <Badge variant="secondary" className="text-xs font-normal">
+                          {session.model}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <span className="text-sm text-muted-foreground">{session.messageCount}</span>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <span className="text-sm text-muted-foreground">{formatRelativeTime(session.updatedAt)}</span>
+                      </TableCell>
+                      <TableCell className="pr-6">
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400"
+                        >
+                          <CircleDot className="w-2.5 h-2.5" />
+                          active
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -894,15 +844,15 @@ function EmptyDashboard() {
 }
 
 /* ═══════════════════════════════════════════
-   TOKEN USAGE CHART (mini bar)
+   TOKEN USAGE CHART — Placeholder (no historical tracking)
    ═══════════════════════════════════════════ */
 
-function TokenUsageMiniChart() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
+function TokenUsageMiniChart({ totalTokens }: { totalTokens: number }) {
+  const formatted = totalTokens >= 1000000
+    ? `${(totalTokens / 1000000).toFixed(1)}M`
+    : totalTokens >= 1000
+      ? `${(totalTokens / 1000).toFixed(1)}k`
+      : String(totalTokens);
 
   return (
     <motion.div variants={itemVariants}>
@@ -916,49 +866,18 @@ function TokenUsageMiniChart() {
               </CardTitle>
               <CardDescription>Daily token consumption (7 days)</CardDescription>
             </div>
-            <span className="text-xs text-muted-foreground font-medium">43.5k total</span>
+            <span className="text-xs text-muted-foreground font-medium">{formatted} total</span>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="h-[160px]">
-            <AnimatePresence>
-              {mounted && (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={activityData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" vertical={false} />
-                    <XAxis
-                      dataKey="day"
-                      tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v: number) => v >= 1000 ? `${v / 1000}k` : v}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        color: 'hsl(var(--foreground))',
-                      }}
-                      formatter={(value: number) => [`${value.toLocaleString()} tokens`, 'Tokens']}
-                    />
-                    <Bar
-                      dataKey="tokens"
-                      fill="hsl(var(--chart-4))"
-                      radius={[4, 4, 0, 0]}
-                      animationDuration={1000}
-                      animationEasing="ease-out"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </AnimatePresence>
+          <div className="h-[160px] flex flex-col items-center justify-center text-center">
+            <div className="p-3 rounded-full bg-muted/50 mb-3">
+              <Activity className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-muted-foreground">Historical token usage</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              Daily breakdown will appear here as you use the agent.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -972,10 +891,32 @@ function TokenUsageMiniChart() {
 
 export function DashboardView() {
   const agentStatus = useAppStore((s) => s.agentStatus);
-  const chatSessions = useAppStore((s) => s.chatSessions);
-  const isEmpty = chatSessions.length === 0 && agentStatus === 'disconnected';
+  const [stats, setStats] = useState<ApiStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (isEmpty) {
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) throw new Error('Failed to fetch stats');
+      const data: ApiStats = await res.json();
+      setStats(data);
+    } catch (err) {
+      console.error('Failed to fetch dashboard stats:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  // Show empty state when agent is disconnected and no sessions
+  if (!loading && !error && (!stats || (stats.totalSessions === 0 && agentStatus === 'disconnected'))) {
     return <EmptyDashboard />;
   }
 
@@ -989,10 +930,20 @@ export function DashboardView() {
         animate={{ opacity: 1, y: 0 }}
         className="mb-6 md:mb-8"
       >
-        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Monitor your agent&apos;s performance, usage, and system health at a glance.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Monitor your agent&apos;s performance, usage, and system health at a glance.
+            </p>
+          </div>
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-destructive">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
       </motion.div>
 
       <motion.div
@@ -1004,9 +955,19 @@ export function DashboardView() {
         {/* ─── Top Row: Stat Cards ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <AgentStatusCard />
-          <TotalSessionsCard />
-          <MessagesTodayCard />
-          <ToolsUsedCard />
+          <TotalSessionsCard
+            total={stats?.totalSessions ?? 0}
+            todayCount={stats?.sessionsToday ?? 0}
+            loading={loading}
+          />
+          <MessagesTodayCard
+            total={stats?.totalMessages ?? 0}
+            loading={loading}
+          />
+          <TokensUsedCard
+            total={stats?.totalTokens ?? 0}
+            loading={loading}
+          />
         </div>
 
         {/* ─── Middle Row: Charts ─── */}
@@ -1016,12 +977,16 @@ export function DashboardView() {
         </div>
 
         {/* ─── Token usage mini chart ─── */}
-        <TokenUsageMiniChart />
+        <TokenUsageMiniChart totalTokens={stats?.totalTokens ?? 0} />
 
         {/* ─── Bottom Row: Sessions + Quick Actions ─── */}
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
           <div className="xl:col-span-3">
-            <RecentSessionsTable />
+            <RecentSessionsTable
+              sessions={stats?.recentSessions ?? []}
+              loading={loading}
+              onRefresh={fetchStats}
+            />
           </div>
           <div className="xl:col-span-2">
             <QuickActionsGrid />

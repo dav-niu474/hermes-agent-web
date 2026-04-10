@@ -6,13 +6,15 @@ import {
   type AgentMessage,
   type SSEEvent,
   type ToolContext,
- type ToolRegistryInterface,
- type MemoryManagerInterface,
- getLLMConfig,
- resolveToolset,
- MemoryManager,
- ALL_TOOLS,
- getToolsetFilter,
+  type ToolRegistryInterface,
+  type MemoryManagerInterface,
+  getLLMConfig,
+  resolveToolset,
+  MemoryManager,
+  ALL_TOOLS,
+  getToolsetFilter,
+  scanSkills,
+  getSkillContent,
 } from "@/lib/hermes";
 import OpenAI from "openai";
 
@@ -23,6 +25,7 @@ import OpenAI from "openai";
 interface ChatMessage {
   role: string;
   content: string;
+  image_url?: string;
 }
 
 interface ChatRequest {
@@ -38,6 +41,37 @@ function generateTitle(content: string): string {
   const cleaned = content.replace(/\n/g, " ").trim();
   if (cleaned.length <= 50) return cleaned;
   return cleaned.slice(0, 47) + "...";
+}
+
+// ---------------------------------------------------------------------------
+// Web-compatible tools
+// ---------------------------------------------------------------------------
+
+const WEB_COMPATIBLE_TOOLS = new Set([
+  "web_search",
+  "web_extract",
+  "vision_analyze",
+  "image_generate",
+  "text_to_speech",
+  "skills_list",
+  "skill_view",
+  "memory",
+  "session_search",
+  "clarify",
+]);
+
+// ---------------------------------------------------------------------------
+// ZAI SDK lazy singleton
+// ---------------------------------------------------------------------------
+
+let _zaiInstance: Awaited<ReturnType<typeof import("z-ai-web-dev-sdk").default.create>> | null = null;
+
+async function getZAI() {
+  if (!_zaiInstance) {
+    const ZAI = (await import("z-ai-web-dev-sdk")).default;
+    _zaiInstance = await ZAI.create();
+  }
+  return _zaiInstance;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,17 +106,359 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
 
   async dispatch(
     name: string,
-    _args: Record<string, unknown>,
+    args: Record<string, unknown>,
     _context: ToolContext,
   ): Promise<string> {
-    // In the web context, tools are dispatched client-side or not at all.
-    // The agent loop uses this for tool definitions; actual tool execution
-    // happens in the hermes-agent runtime. For the web API server, we
-    // return a descriptive placeholder so the LLM can explain what it
-    // would do. The frontend can then render tool-call UI elements.
+    // Non-web-compatible tools: return placeholder
+    if (!WEB_COMPATIBLE_TOOLS.has(name)) {
+      return JSON.stringify({
+        note: `Tool '${name}' is registered but not executable in the web API context. The agent described the intended action above.`,
+        tool: name,
+      });
+    }
+
+    try {
+      switch (name) {
+        case "web_search":
+          return await this.handleWebSearch(args);
+        case "web_extract":
+          return await this.handleWebExtract(args);
+        case "vision_analyze":
+          return await this.handleVisionAnalyze(args);
+        case "image_generate":
+          return await this.handleImageGenerate(args);
+        case "text_to_speech":
+          return await this.handleTextToSpeech(args);
+        case "skills_list":
+          return await this.handleSkillsList(args);
+        case "skill_view":
+          return await this.handleSkillView(args);
+        case "memory":
+          return await this.handleMemory(args);
+        case "session_search":
+          return await this.handleSessionSearch(args);
+        case "clarify":
+          return this.handleClarify(args);
+        default:
+          return JSON.stringify({
+            note: `Tool '${name}' is registered but not executable in the web API context.`,
+            tool: name,
+          });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[ToolRegistry] Error dispatching '${name}':`, msg);
+      return JSON.stringify({ error: `Tool '${name}' failed: ${msg}` });
+    }
+  }
+
+  // ── Individual tool handlers ──────────────────────────────────────
+
+  private async handleWebSearch(args: Record<string, unknown>): Promise<string> {
+    const query = String(args.query ?? "");
+    if (!query.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: query" });
+    }
+
+    const zai = await getZAI();
+    const results = await zai.functions.invoke("web_search", {
+      query,
+      num: 5,
+    });
+
+    // Format results
+    if (results && typeof results === "object" && "results" in results) {
+      const items = (results as Record<string, unknown>).results;
+      if (Array.isArray(items)) {
+        const formatted = items
+          .slice(0, 5)
+          .map((item: Record<string, unknown>, i: number) =>
+            `${i + 1}. **${item.title ?? "No title"}**\n   ${item.url ?? ""}\n   ${item.description ?? ""}`,
+          )
+          .join("\n\n");
+        return formatted || JSON.stringify(results);
+      }
+    }
+    return typeof results === "string"
+      ? results
+      : JSON.stringify(results);
+  }
+
+  private async handleWebExtract(args: Record<string, unknown>): Promise<string> {
+    const urls = args.urls;
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return JSON.stringify({ error: "Missing required parameter: urls (array)" });
+    }
+
+    const zai = await getZAI();
+    const results: string[] = [];
+
+    for (const url of urls.slice(0, 5)) {
+      const urlStr = String(url);
+      try {
+        const result = await zai.functions.invoke("page_reader", { url: urlStr });
+        const content =
+          typeof result === "string"
+            ? result
+            : result && typeof result === "object" && "content" in result
+              ? String((result as Record<string, unknown>).content)
+              : JSON.stringify(result);
+        results.push(`### ${urlStr}\n\n${content}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push(`### ${urlStr}\n\nError extracting content: ${msg}`);
+      }
+    }
+
+    return results.join("\n\n---\n\n");
+  }
+
+  private async handleVisionAnalyze(args: Record<string, unknown>): Promise<string> {
+    const imageUrl = String(args.image_url ?? "");
+    const question = String(args.question ?? "Describe this image");
+
+    if (!imageUrl.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: image_url" });
+    }
+
+    const zai = await getZAI();
+    const response = await zai.chat.completions.createVision({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: question },
+            { type: "image_url", image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+      thinking: { type: "disabled" },
+    });
+
+    const choices = (response as Record<string, unknown>)?.choices;
+    const firstChoice = Array.isArray(choices) && choices.length > 0 ? choices[0] as Record<string, unknown> : null;
+    const message = firstChoice?.message as Record<string, unknown> | undefined;
+    const text = (message?.content as string) ?? "No analysis returned.";
+    return text;
+  }
+
+  private async handleImageGenerate(args: Record<string, unknown>): Promise<string> {
+    const prompt = String(args.prompt ?? "");
+    if (!prompt.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: prompt" });
+    }
+
+    const aspectRatio = String(args.aspect_ratio ?? "landscape");
+    let size = "1344x768";
+    if (aspectRatio === "portrait") size = "768x1344";
+    else if (aspectRatio === "square") size = "1024x1024";
+
+    const zai = await getZAI();
+    const response = await zai.images.generations.create({
+      prompt,
+      size,
+    });
+
+    const respData = (response as Record<string, unknown>).data;
+    if (Array.isArray(respData) && respData.length > 0) {
+      const firstItem = respData[0] as Record<string, unknown>;
+      const imageBase64 = firstItem.base64 as string | undefined;
+      if (imageBase64) {
+        const dataUrl = `data:image/png;base64,${imageBase64}`;
+        return JSON.stringify({
+          imageGenerated: true,
+          dataUrl,
+          prompt,
+        });
+      }
+      // If URL-based response
+      const url = firstItem.url as string | undefined;
+      if (url) {
+        return JSON.stringify({
+          imageGenerated: true,
+          url,
+          prompt,
+        });
+      }
+    }
+
+    return JSON.stringify({ error: "Image generation returned no data." });
+  }
+
+  private async handleTextToSpeech(args: Record<string, unknown>): Promise<string> {
+    const text = String(args.text ?? "");
+    if (!text.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: text" });
+    }
+
+    const truncatedText = text.substring(0, 1024);
+
+    const zai = await getZAI();
+    const response = await zai.audio.tts.create({
+      input: truncatedText,
+      voice: "tongtong",
+      speed: 1.0,
+      response_format: "mp3",
+      stream: false,
+    });
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(new Uint8Array(arrayBuffer));
+    const audioBase64 = buffer.toString("base64");
+
     return JSON.stringify({
-      note: `Tool '${name}' is registered but not executable in the web API context. The agent described the intended action above.`,
-      tool: name,
+      audioGenerated: true,
+      audioDataUrl: `data:audio/mp3;base64,${audioBase64}`,
+      textLength: text.length,
+    });
+  }
+
+  private async handleSkillsList(args: Record<string, unknown>): Promise<string> {
+    const category = args.category ? String(args.category) : undefined;
+    const skills = await scanSkills({ category });
+    return JSON.stringify(
+      skills.map((s) => ({
+        name: s.name,
+        description: s.description,
+        category: s.category,
+      })),
+    );
+  }
+
+  private async handleSkillView(args: Record<string, unknown>): Promise<string> {
+    const skillName = String(args.name ?? "");
+    if (!skillName.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: name" });
+    }
+
+    const filePath = args.file_path ? String(args.file_path) : undefined;
+    const result = await getSkillContent(skillName);
+
+    if (!result) {
+      return JSON.stringify({
+        error: `Skill '${skillName}' not found. Use skills_list to see available skills.`,
+      });
+    }
+
+    if (filePath) {
+      return JSON.stringify({
+        name: skillName,
+        content: result.content,
+        linkedFiles: result.linkedFiles,
+        requestedFile: filePath,
+        note: "Specific file content access requires file system traversal.",
+      });
+    }
+
+    return JSON.stringify({
+      name: skillName,
+      content: result.content,
+      linkedFiles: result.linkedFiles.map((f) => ({
+        name: f.name,
+        size: f.size,
+      })),
+    });
+  }
+
+  private async handleMemory(args: Record<string, unknown>): Promise<string> {
+    const mm = new MemoryManager();
+    const action = String(args.action ?? "read");
+
+    if (action === "read") {
+      const data = await mm.readMemory();
+      return JSON.stringify({
+        memoryContent: data.memoryContent,
+        userContent: data.userContent,
+        memoryUsage: data.memoryUsage,
+        userUsage: data.userUsage,
+        memoryEntries: data.memoryEntries.length,
+        userEntries: data.userEntries.length,
+      });
+    }
+
+    if (action === "write" || action === "append") {
+      const content = String(args.content ?? "");
+      if (!content.trim()) {
+        return JSON.stringify({ error: "Missing required parameter: content" });
+      }
+      const target = String(args.target ?? "memory");
+      const result = await mm.add(
+        target === "user" ? "user" : "memory",
+        content,
+      );
+      return JSON.stringify(result);
+    }
+
+    if (action === "replace") {
+      const oldText = String(args.old_text ?? "");
+      const newContent = String(args.new_content ?? args.content ?? "");
+      const target = String(args.target ?? "memory");
+      const result = await mm.replace(
+        target === "user" ? "user" : "memory",
+        oldText,
+        newContent,
+      );
+      return JSON.stringify(result);
+    }
+
+    if (action === "remove") {
+      const oldText = String(args.old_text ?? "");
+      const target = String(args.target ?? "memory");
+      const result = await mm.remove(
+        target === "user" ? "user" : "memory",
+        oldText,
+      );
+      return JSON.stringify(result);
+    }
+
+    // Default: return current memory
+    const data = await mm.readMemory();
+    return JSON.stringify({
+      memoryContent: data.memoryContent,
+      userContent: data.userContent,
+      memoryUsage: data.memoryUsage,
+      userUsage: data.userUsage,
+    });
+  }
+
+  private async handleSessionSearch(args: Record<string, unknown>): Promise<string> {
+    const query = String(args.query ?? "");
+
+    const messages = await db.chatMessage.findMany({
+      where: {
+        OR: [
+          { content: { contains: query } },
+        ],
+      },
+      take: 10,
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (messages.length === 0) {
+      return JSON.stringify({
+        results: [],
+        message: query
+          ? `No messages found matching '${query}'`
+          : "No past messages found.",
+      });
+    }
+
+    return JSON.stringify({
+      results: messages.map((m) => ({
+        role: m.role,
+        content: m.content.substring(0, 200),
+        sessionId: m.sessionId,
+        createdAt: m.createdAt.toISOString(),
+      })),
+      count: messages.length,
+    });
+  }
+
+  private handleClarify(args: Record<string, unknown>): Promise<string> {
+    const question = String(args.question ?? "Could you clarify what you mean?");
+    return JSON.stringify({
+      clarificationNeeded: true,
+      question,
     });
   }
 }
@@ -131,6 +507,42 @@ export async function POST(request: NextRequest) {
     const shouldStream = body.stream !== false;
     const lastMessage = body.messages[body.messages.length - 1];
     const startTime = Date.now();
+
+    // ── If the last user message has an image, run vision analysis first ──
+    if (
+      lastMessage.role === 'user' &&
+      lastMessage.image_url &&
+      WEB_COMPATIBLE_TOOLS.has('vision_analyze')
+    ) {
+      try {
+        const zai = await getZAI();
+        const visionResponse = await zai.chat.completions.createVision({
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Describe this image in detail. If the user provided a question alongside the image, answer it.' },
+                { type: 'image_url', image_url: { url: lastMessage.image_url } },
+              ],
+            },
+          ],
+          thinking: { type: 'disabled' },
+        });
+
+        const choices = (visionResponse as Record<string, unknown>)?.choices;
+        const firstChoice = Array.isArray(choices) && choices.length > 0 ? choices[0] as Record<string, unknown> : null;
+        const visionMessage = firstChoice?.message as Record<string, unknown> | undefined;
+        const visionText = (visionMessage?.content as string) ?? '';
+
+        if (visionText) {
+          // Prepend the image analysis to the user message content
+          lastMessage.content = `[User uploaded an image. Vision analysis: ${visionText}]\n\n${lastMessage.content || ''}`;
+        }
+      } catch (visionErr) {
+        console.error('[Chat API] Vision analysis failed:', visionErr);
+        lastMessage.content = `[User uploaded an image but vision analysis failed. Image URL: ${lastMessage.image_url}]\n\n${lastMessage.content || ''}`;
+      }
+    }
 
     // ── Resolve local session ──
     let localSessionId = body.sessionId;
