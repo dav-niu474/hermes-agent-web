@@ -592,3 +592,21 @@ Stage Summary:
 - Bug 1 (input scrolling): FIXED — overflow containment moved from app-shell to individual views
 - Bug 2 (session deletion): FIXED — AlertDialog confirmation + toast feedback
 - Bug 3 (model selector): FIXED — 18 models across 6 providers in searchable popover
+
+---
+
+Task ID: add-glm-nvidia-models
+Agent: Main
+Task: Add GLM 4.7 and GLM 5 model names to the NVIDIA NIM provider section
+
+Work Log:
+- Read `chat-view.tsx` — found MODEL_GROUPS array at line 88 defining available models
+- Read `provider.ts` — found NvidiaProvider class with model list in comments
+- Added `{ id: 'z-ai/glm-4.7', name: 'GLM 4.7', provider: 'nvidia', description: 'ZhipuAI GLM 4.7 (reasoning)' }` to NVIDIA NIM group
+- Added `{ id: 'z-ai/glm-5', name: 'GLM 5', provider: 'nvidia', description: 'ZhipuAI GLM 5' }` to NVIDIA NIM group
+- Updated provider.ts NvidiaProvider JSDoc to include GLM 4.7 and GLM 5
+- Ran lint — all pre-existing errors only (in hermes-agent/), no new errors
+
+Stage Summary:
+- GLM 4.7 (`z-ai/glm-4.7`) and GLM 5 (`z-ai/glm-5`) now appear in the model selector under "NVIDIA NIM" group
+- Files modified: `src/components/hermes/views/chat-view.tsx`, `src/lib/hermes/provider.ts`

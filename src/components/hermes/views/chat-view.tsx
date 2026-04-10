@@ -94,6 +94,8 @@ const MODEL_GROUPS: { provider: string; models: ModelOption[] }[] = [
       { id: 'mistralai/mixtral-8x22b-instruct-v0.1', name: 'Mixtral 8x22B', provider: 'nvidia', description: 'Mistral Mixtral 8x22B Instruct' },
       { id: 'google/gemma-2-27b-it', name: 'Gemma 2 27B', provider: 'nvidia', description: 'Google Gemma 2 27B IT' },
       { id: 'nvidia/nemotron-4-340b-instruct', name: 'Nemotron 4 340B', provider: 'nvidia', description: 'NVIDIA Nemotron 4 340B Instruct' },
+      { id: 'z-ai/glm-4.7', name: 'GLM 4.7', provider: 'nvidia', description: 'ZhipuAI GLM 4.7 (reasoning)' },
+      { id: 'z-ai/glm-5', name: 'GLM 5', provider: 'nvidia', description: 'ZhipuAI GLM 5' },
     ],
   },
   {

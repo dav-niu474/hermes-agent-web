@@ -449,9 +449,11 @@ abstract class BaseProvider implements Provider {
  *
  * Supports tool calling and streaming.  Models include:
  * - meta/llama-3.3-70b-instruct
+ * - meta/llama-3.1-405b-instruct
  * - nvidia/llama-3.1-nemotron-70b-instruct
  * - mistralai/mixtral-8x22b-instruct-v0.1
- * - z-ai/glm4.7 (GLM on NIM — returns reasoning_content)
+ * - z-ai/glm-4.7 (GLM 4.7 on NIM — returns reasoning_content)
+ * - z-ai/glm-5 (GLM 5 on NIM)
  */
 export class NvidiaProvider extends BaseProvider {
   readonly name = "nvidia";
