@@ -488,3 +488,82 @@ Implemented the core agent loop and system prompt builder in TypeScript, faithfu
 - Server-side code — no 'use client' directive; intended for API route usage
 - ToolRegistry and MemoryManager are interface-based — consumers provide implementations
 - System prompt is cached per AgentLoop instance (rebuilt only if `buildSystemPrompt()` is called again)
+
+---
+
+## Task 10: Final Verification — Complete Hermes Agent Embedding Audit
+
+**Status**: ✅ Completed
+**Date**: 2025-07-11
+
+### Summary
+Comprehensive audit and verification of the hermes-agent core module embedding. All modules have been verified as complete (not simplified), all API routes use the embedded TypeScript modules directly (no mini-service proxy), and the dev server compiles and runs successfully.
+
+### Architecture (Final)
+
+```
+Browser → Next.js API Routes → lib/hermes/ (embedded TypeScript)
+                                ├── agent-loop.ts (1,109 lines) — Full agent loop
+                                ├── prompt-builder.ts (373 lines) — System prompt assembly
+                                ├── provider.ts (736 lines) — 6 provider classes
+                                ├── config.ts (648 lines) — YAML config + env var resolution
+                                ├── tool-registry.ts (552 lines) — Dynamic tool registration
+                                ├── toolsets.ts (652 lines) — Toolset grouping + resolution
+                                ├── tools-registry.ts (1,239 lines) — Static tool definitions
+                                ├── skills.ts (1,353 lines) — Skill scanning + CRUD
+                                ├── memory.ts (711 lines) — Memory manager + security
+                                └── index.ts (140 lines) — Public API barrel export
+                                Total: 7,513 lines of TypeScript
+```
+
+### Verification Results
+
+#### Embedded Modules (all verified complete)
+| Module | Lines | Status | Notes |
+|--------|-------|--------|-------|
+| agent-loop.ts | 1,109 | ✅ Complete | Iteration budget, parallel tool exec, streaming, surrogate sanitization, reasoning content, error recovery |
+| prompt-builder.ts | 373 | ✅ Complete | 8-layer prompt assembly, platform hints, tool enforcement, model-specific guidance |
+| provider.ts | 736 | ✅ Complete | NvidiaProvider, OpenAIProvider, OpenRouterProvider, AnthropicProvider, GoogleProvider, GlmProvider, GenericProvider |
+| config.ts | 648 | ✅ Complete | YAML deep-merge, env var expansion, provider auto-detection, toolset filtering |
+| tool-registry.ts | 552 | ✅ Complete | Dynamic registration, dispatch, argument coercion, availability checks |
+| toolsets.ts | 652 | ✅ Complete | 35+ toolsets, recursive resolution, cycle detection, plugin bridge |
+| tools-registry.ts | 1,239 | ✅ Complete | 45 tools with full JSON Schema, 18 toolsets, 11 categories |
+| skills.ts | 1,353 | ✅ Complete | YAML frontmatter parser, recursive dir scan, CRUD, system prompt builder |
+| memory.ts | 711 | ✅ Complete | MEMORY.md/USER.md, § delimiter, prompt injection detection, prefetch |
+
+#### API Routes (all use embedded modules directly)
+| Route | Method | Status | Implementation |
+|-------|--------|--------|----------------|
+| /api/chat | POST | ✅ Working | AgentLoop + SSE streaming + Prisma session persistence |
+| /api/tools | GET | ✅ Working | ALL_TOOLS from embedded registry |
+| /api/skills | GET | ✅ Working | scanSkills() from embedded skills system |
+| /api/skills/[name] | GET | ✅ Working | getSkillContent() from embedded skills system |
+| /api/memory | GET/PUT | ✅ Working | MemoryManager from embedded memory system |
+| /api/hermes | GET/PUT | ✅ Working | getLLMConfig() + toolset resolution from embedded config |
+| /api/config | GET/PUT | ✅ Working | loadConfig()/updateConfig() from embedded config |
+| /api/sessions | GET | ✅ Working | Prisma DB session listing |
+| /api/cronjobs | GET | ✅ Working | Cron job management |
+
+#### Code Quality
+- **ESLint**: Zero errors in `src/` (5 pre-existing errors in `hermes-agent/` only)
+- **TypeScript**: Strict mode, no type errors
+- **Dev Server**: Compiles and runs successfully
+
+### Changes Made This Session
+1. Verified all API routes no longer proxy to mini-service (confirmed direct lib/hermes usage)
+2. Added `allowedDevOrigins` in next.config.ts for cross-origin dev support
+3. Confirmed mini-services directory is empty (no Python proxy)
+4. Complete module-by-module audit of all 9 hermes TypeScript files
+
+### Key Achievement
+The hermes-agent core system has been **completely rewritten in TypeScript** (7,513 lines) and **fully embedded** into the Next.js backend. No separate Python service is needed. All API routes directly call the embedded modules. The agent loop supports:
+- Full tool calling cycle (LLM → tool_calls → execute → feed back → loop)
+- Iteration budget with two-tier pressure warnings (70%/90%)
+- Parallel tool execution with path overlap detection
+- SSE streaming with reasoning content, tool start/end events
+- 6 LLM providers (NVIDIA NIM, OpenAI, OpenRouter, Anthropic, Google, GLM)
+- 45 registered tools across 18 toolsets
+- 120+ skills from hermes-agent/skills/ directory
+- Persistent memory with prompt injection detection
+- Complete system prompt builder (8 layers)
+

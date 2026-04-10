@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   // Vercel serverless output
   output: "standalone",
+  // Allow cross-origin requests from preview domains
+  allowedDevOrigins: [
+    /\.space\.z\.ai$/,
+    /\.z\.ai$/,
+  ],
   // Allow external image domains if needed
   images: {
     remotePatterns: [
