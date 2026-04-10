@@ -83,78 +83,10 @@ const SUGGESTIONS = [
    MODEL DEFINITIONS
    ═════════════════════════════════════════════════════ */
 
-interface ModelOption {
-  id: string;
-  name: string;
-  provider: string;
-  description?: string;
-}
-
-const MODEL_GROUPS: { provider: string; models: ModelOption[] }[] = [
-  {
-    provider: 'NVIDIA NIM',
-    models: [
-      { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', provider: 'nvidia', description: 'Meta Llama 3.3 70B Instruct' },
-      { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B', provider: 'nvidia', description: 'Meta Llama 3.1 405B Instruct' },
-      { id: 'mistralai/mixtral-8x22b-instruct-v0.1', name: 'Mixtral 8x22B', provider: 'nvidia', description: 'Mistral Mixtral 8x22B Instruct' },
-      { id: 'google/gemma-2-27b-it', name: 'Gemma 2 27B', provider: 'nvidia', description: 'Google Gemma 2 27B IT' },
-      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1', name: 'Nemotron Super 49B', provider: 'nvidia', description: 'NVIDIA Nemotron 3 Super 49B' },
-      { id: 'z-ai/glm4.7', name: 'GLM 4.7', provider: 'nvidia', description: 'ZhipuAI GLM 4.7 (reasoning)' },
-      { id: 'z-ai/glm5', name: 'GLM 5', provider: 'nvidia', description: 'ZhipuAI GLM 5' },
-    ],
-  },
-  {
-    provider: 'OpenAI',
-    models: [
-      { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', description: 'OpenAI GPT-4o multimodal' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', description: 'OpenAI GPT-4o Mini (fast)' },
-      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'openai', description: 'OpenAI GPT-4 Turbo' },
-      { id: 'o1-mini', name: 'o1-mini', provider: 'openai', description: 'OpenAI o1 reasoning model' },
-    ],
-  },
-  {
-    provider: 'Anthropic',
-    models: [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', description: 'Anthropic Claude Sonnet 4' },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic', description: 'Anthropic Claude 3.5 Sonnet' },
-      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', description: 'Anthropic Claude 3.5 Haiku (fast)' },
-    ],
-  },
-  {
-    provider: 'Google',
-    models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', description: 'Google Gemini 2.5 Flash' },
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', description: 'Google Gemini 2.0 Flash' },
-    ],
-  },
-  {
-    provider: 'GLM (ZhipuAI)',
-    models: [
-      { id: 'glm-4-plus', name: 'GLM-4 Plus', provider: 'glm', description: 'ZhipuAI GLM-4 Plus' },
-      { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', provider: 'glm', description: 'ZhipuAI GLM-4.5 Flash (fast)' },
-    ],
-  },
-  {
-    provider: 'OpenRouter',
-    models: [
-      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4 (OR)', provider: 'openrouter', description: 'Via OpenRouter' },
-      { id: 'openai/gpt-4o', name: 'GPT-4o (OR)', provider: 'openrouter', description: 'Via OpenRouter' },
-    ],
-  },
-];
-
-const ALL_MODELS = MODEL_GROUPS.flatMap((g) => g.models);
-const DEFAULT_MODEL = 'meta/llama-3.3-70b-instruct';
-
-function getModelName(modelId: string): string {
-  const found = ALL_MODELS.find((m) => m.id === modelId);
-  if (found) return found.name;
-  const parts = modelId.split('/');
-  return parts[parts.length - 1] || modelId;
-}
+import { MODEL_GROUPS, ALL_MODELS, DEFAULT_MODEL, getModelName, getModelDef } from '@/lib/hermes/models';
 
 function getModelProvider(modelId: string): string {
-  const found = ALL_MODELS.find((m) => m.id === modelId);
+  const found = getModelDef(modelId);
   return found?.provider || 'unknown';
 }
 
@@ -696,7 +628,8 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
       (m) =>
         m.name.toLowerCase().includes(search.toLowerCase()) ||
         m.id.toLowerCase().includes(search.toLowerCase()) ||
-        m.provider.toLowerCase().includes(search.toLowerCase())
+        m.group.toLowerCase().includes(search.toLowerCase()) ||
+        m.desc.toLowerCase().includes(search.toLowerCase())
     ),
   })).filter((group) => group.models.length > 0);
 
@@ -726,7 +659,7 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
             />
           </div>
         </div>
-        <ScrollArea className="max-h-64">
+        <ScrollArea className="max-h-96">
           <div className="p-1">
             {filteredGroups.map((group) => (
               <div key={group.provider}>
@@ -759,8 +692,15 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
                       )}
                     >
                       <span className="font-medium truncate min-w-0">{model.name}</span>
-                      {model.description && (
-                        <span className="text-[10px] text-muted-foreground/60 truncate hidden sm:inline">{model.description}</span>
+                      {model.tags && model.tags.length > 0 && (
+                        <span className="flex gap-1 shrink-0">
+                          {model.tags.map((tag) => (
+                            <span key={tag} className="px-1 py-0.5 rounded text-[9px] font-medium bg-primary/10 text-primary leading-none">{tag}</span>
+                          ))}
+                        </span>
+                      )}
+                      {model.desc && (
+                        <span className="text-[10px] text-muted-foreground/60 truncate hidden lg:inline">{model.desc}</span>
                       )}
                       {isSelected && <Check className="size-3 shrink-0 text-primary ml-auto" />}
                     </div>
