@@ -15,8 +15,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Mobile spacer for fixed header */}
           <div className="h-14 md:hidden shrink-0" />
-          {/* Page content */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Page content — overflow handled by individual views */}
+          <div className="flex-1 overflow-hidden">
             {children}
           </div>
         </main>
