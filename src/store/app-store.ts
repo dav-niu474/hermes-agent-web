@@ -3,11 +3,25 @@ import { create } from 'zustand';
 export type ThemeStyle = 'default' | 'emerald' | 'rose' | 'ocean';
 export type SidebarView = 'chat' | 'dashboard' | 'tools' | 'skills' | 'sessions' | 'memory' | 'settings' | 'cronjobs';
 
+/** A tracked tool call within an assistant message. */
+export interface ToolCallEntry {
+  id: string;
+  name: string;
+  args: string;
+  status: 'running' | 'done' | 'error';
+  result?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  toolCalls?: string;
+  /** Accumulated reasoning / thinking text (rendered in collapsible block). */
+  reasoning: string;
+  /** Tool calls tracked during this message's generation. */
+  toolCallEntries: ToolCallEntry[];
   tokens?: number;
   duration?: number;
   createdAt?: Date;
@@ -31,6 +45,12 @@ interface AppState {
   setCurrentSessionId: (id: string | null) => void;
   addChatMessage: (message: ChatMessage) => void;
   updateLastAssistantMessage: (content: string) => void;
+  /** Append reasoning text to the last assistant message. */
+  appendReasoning: (text: string) => void;
+  /** Add or update a tool call entry on the last assistant message. */
+  upsertToolCall: (entry: ToolCallEntry) => void;
+  /** Mark the latest running tool call as done with a result. */
+  completeToolCall: (id: string, result: string) => void;
   setIsStreaming: (streaming: boolean) => void;
   setChatSessions: (sessions: { id: string; title: string; model: string }[]) => void;
   clearMessages: () => void;
@@ -82,6 +102,51 @@ export const useAppStore = create<AppState>((set) => ({
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === 'assistant') {
           msgs[i] = { ...msgs[i], content };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+  appendReasoning: (text) =>
+    set((s) => {
+      const msgs = [...s.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          msgs[i] = { ...msgs[i], reasoning: (msgs[i].reasoning || '') + text };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+  upsertToolCall: (entry) =>
+    set((s) => {
+      const msgs = [...s.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          const existing = msgs[i].toolCallEntries || [];
+          const idx = existing.findIndex((t) => t.id === entry.id);
+          if (idx >= 0) {
+            existing[idx] = { ...existing[idx], ...entry };
+          } else {
+            existing.push(entry);
+          }
+          msgs[i] = { ...msgs[i], toolCallEntries: existing };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+  completeToolCall: (id, result) =>
+    set((s) => {
+      const msgs = [...s.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          const existing = msgs[i].toolCallEntries || [];
+          const idx = existing.findIndex((t) => t.id === id);
+          if (idx >= 0) {
+            existing[idx] = { ...existing[idx], status: 'done' as const, result, completedAt: Date.now() };
+          }
+          msgs[i] = { ...msgs[i], toolCallEntries: existing };
           break;
         }
       }

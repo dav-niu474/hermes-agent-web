@@ -24,8 +24,13 @@ import {
   Wrench,
   Loader2,
   ChevronDown,
+  ChevronRight,
   Cpu,
   ArrowDown,
+  Brain,
+  AlertCircle,
+  CheckCircle2,
+  Terminal,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -61,7 +66,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { useAppStore, type ChatMessage } from '@/store/app-store';
+import { useAppStore, type ChatMessage, type ToolCallEntry } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
@@ -165,6 +170,168 @@ interface SessionItem {
 }
 
 /* ═════════════════════════════════════════════════════
+   THINKING BLOCK (collapsible reasoning display)
+   ═════════════════════════════════════════════════════ */
+
+function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!reasoning) return null;
+  const isDone = !isStreaming;
+  const lines = reasoning.split('\n').filter((l) => l.trim());
+  const preview = lines.slice(0, 2).join(' ').slice(0, 120);
+  const fullLines = lines.length;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="my-2"
+    >
+      <button
+        onClick={() => setOpen(!open)}
+        className={cn(
+          'group/w flex items-center gap-2 w-full text-left px-3 py-2 rounded-xl text-xs transition-colors',
+          'bg-violet-50/80 dark:bg-violet-500/5 border border-violet-200/50 dark:border-violet-500/15',
+          'hover:bg-violet-100/80 dark:hover:bg-violet-500/10',
+        )}
+      >
+        <Brain className="size-3.5 shrink-0 text-violet-500 dark:text-violet-400" />
+        <span className="font-medium text-violet-700 dark:text-violet-300">
+          {isDone ? 'Thought for a moment' : 'Thinking...'}
+        </span>
+        {!isDone && <Loader2 className="size-3 animate-spin text-violet-400" />}
+        {isDone && fullLines > 2 && (
+          <span className="text-violet-500/60 dark:text-violet-400/50">({fullLines} lines)</span>
+        )}
+        <ChevronDown className={cn(
+          'size-3 ml-auto text-violet-400 transition-transform',
+          open && 'rotate-180'
+        )} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 py-2.5 mt-1 rounded-xl bg-violet-50/60 dark:bg-violet-500/5 border border-violet-200/30 dark:border-violet-500/10">
+              <pre className="text-[11px] leading-relaxed text-violet-800/80 dark:text-violet-200/70 whitespace-pre-wrap font-mono break-words max-h-64 overflow-y-auto">
+                {reasoning}
+              </pre>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Inline preview when collapsed and streaming */}
+      {!open && isStreaming && preview && (
+        <p className="text-[11px] text-violet-500/60 dark:text-violet-400/50 px-3 mt-1 truncate font-mono">
+          {preview}
+        </p>
+      )}
+    </motion.div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════
+   TOOL CALL BLOCK
+   ═════════════════════════════════════════════════════ */
+
+function ToolCallBlock({ entry }: { entry: ToolCallEntry }) {
+  const [open, setOpen] = useState(false);
+  const isRunning = entry.status === 'running';
+  const isDone = entry.status === 'done';
+  const isError = entry.status === 'error';
+  const duration = entry.startedAt && entry.completedAt
+    ? ((entry.completedAt - entry.startedAt) / 1000).toFixed(1)
+    : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="my-1.5"
+    >
+      <button
+        onClick={() => setOpen(!open)}
+        className={cn(
+          'group/t flex items-center gap-2 w-full text-left px-3 py-2 rounded-xl text-xs transition-colors',
+          isRunning && 'bg-amber-50/80 dark:bg-amber-500/5 border border-amber-200/50 dark:border-amber-500/15',
+          isDone && 'bg-emerald-50/80 dark:bg-emerald-500/5 border border-emerald-200/50 dark:border-emerald-500/15',
+          isError && 'bg-red-50/80 dark:bg-red-500/5 border border-red-200/50 dark:border-red-500/15',
+        )}
+      >
+        <Wrench className={cn(
+          'size-3.5 shrink-0',
+          isRunning && 'text-amber-500 dark:text-amber-400',
+          isDone && 'text-emerald-500 dark:text-emerald-400',
+          isError && 'text-red-500 dark:text-red-400',
+        )} />
+        <span className={cn(
+          'font-mono font-medium truncate',
+          isRunning && 'text-amber-700 dark:text-amber-300',
+          isDone && 'text-emerald-700 dark:text-emerald-300',
+          isError && 'text-red-700 dark:text-red-300',
+        )}>
+          {entry.name}
+        </span>
+        {isRunning && <Loader2 className="size-3 animate-spin text-amber-400" />}
+        {isDone && <CheckCircle2 className="size-3 text-emerald-500" />}
+        {isError && <AlertCircle className="size-3 text-red-500" />}
+        {duration && (
+          <span className="text-[10px] text-muted-foreground/60 ml-auto shrink-0">{duration}s</span>
+        )}
+        <ChevronDown className={cn(
+          'size-3 text-muted-foreground/50 transition-transform shrink-0',
+          open && 'rotate-180'
+        )} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 py-2.5 mt-1 rounded-xl bg-muted/50 border border-border/40 space-y-2">
+              {entry.args && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Arguments</p>
+                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/50 rounded-lg p-2 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
+                    {(() => { try { return JSON.stringify(JSON.parse(entry.args), null, 2); } catch { return entry.args; } })()}
+                  </pre>
+                </div>
+              )}
+              {entry.result && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Result</p>
+                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/50 rounded-lg p-2 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
+                    {(() => { try { return JSON.stringify(JSON.parse(entry.result), null, 2); } catch { return entry.result; } })()}
+                  </pre>
+                </div>
+              )}
+              {isRunning && !entry.result && (
+                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <Terminal className="size-3" />
+                  <span className="text-[11px]">Executing...</span>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════
    MESSAGE BUBBLE
    ═════════════════════════════════════════════════════ */
 
@@ -209,6 +376,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     ? format(new Date(message.createdAt), 'HH:mm')
     : null;
 
+  const hasReasoning = !!message.reasoning;
+  const hasToolCalls = (message.toolCallEntries?.length ?? 0) > 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -222,23 +392,52 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         </AvatarFallback>
       </Avatar>
       <div className={cn('max-w-[85%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
-        <div
-          className={cn(
-            'rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
-            isUser
-              ? 'bg-primary text-primary-foreground rounded-tr-sm'
-              : 'bg-card border border-border/50 rounded-tl-sm shadow-sm'
-          )}
-        >
-          {isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          ) : (
-            <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-            </div>
-          )}
-          {message.isStreaming && <span className="streaming-cursor" />}
-        </div>
+        {/* Thinking / Reasoning Block */}
+        {!isUser && hasReasoning && (
+          <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} />
+        )}
+
+        {/* Tool Call Blocks */}
+        {!isUser && hasToolCalls && (
+          <div className="space-y-1">
+            {message.toolCallEntries!.map((tc) => (
+              <ToolCallBlock key={tc.id} entry={tc} />
+            ))}
+          </div>
+        )}
+
+        {/* Main content bubble */}
+        {(isUser || message.content) && (
+          <div
+            className={cn(
+              'rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
+              isUser
+                ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                : cn(
+                    'bg-card border border-border/50 rounded-tl-sm shadow-sm',
+                    (hasReasoning || hasToolCalls) && 'rounded-tl-lg'
+                  )
+            )}
+          >
+            {isUser ? (
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            ) : (
+              <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
+                <ReactMarkdown>{message.content || ' '}</ReactMarkdown>
+              </div>
+            )}
+            {message.isStreaming && message.content && <span className="streaming-cursor" />}
+          </div>
+        )}
+
+        {/* Streaming indicator when no content yet but thinking/tools are happening */}
+        {!isUser && !message.content && message.isStreaming && (hasReasoning || hasToolCalls) && (
+          <div className="flex items-center gap-1.5 px-1 py-0.5">
+            <Loader2 className="size-3 animate-spin text-primary/50" />
+            <span className="text-[10px] text-muted-foreground/50">Generating response...</span>
+          </div>
+        )}
+
         <div className={cn('flex items-center gap-1.5 px-1 h-4', isUser ? 'flex-row-reverse' : 'flex-row')}>
           {timeStr && <span className="text-[10px] text-muted-foreground/60">{timeStr}</span>}
           {!isUser && !message.isStreaming && message.content && (
@@ -614,6 +813,9 @@ export function ChatView() {
     chatMessages,
     addChatMessage,
     updateLastAssistantMessage,
+    appendReasoning,
+    upsertToolCall,
+    completeToolCall,
     isStreaming,
     setIsStreaming,
     currentSessionId,
@@ -812,13 +1014,52 @@ export function ChatView() {
 
           try {
             const parsed = JSON.parse(data);
+            const eventType = parsed['x-event-type'] || 'content';
             const delta = parsed.choices?.[0]?.delta;
-            if (delta?.content) {
-              fullContent += delta.content;
-              updateLastAssistantMessage(fullContent);
+
+            switch (eventType) {
+              case 'reasoning': {
+                // Append to reasoning block
+                if (delta?.content) {
+                  appendReasoning(delta.content);
+                }
+                break;
+              }
+              case 'tool_start': {
+                // Register a running tool call
+                const toolId = parsed['x-tool-id'] || `tool-${Date.now()}`;
+                const toolName = parsed['x-tool-name'] || 'unknown';
+                const toolArgs = parsed['x-tool-args'] || '';
+                upsertToolCall({
+                  id: toolId,
+                  name: toolName,
+                  args: toolArgs,
+                  status: 'running',
+                  startedAt: Date.now(),
+                });
+                break;
+              }
+              case 'tool_end': {
+                // Complete the tool call
+                const endToolId = parsed['x-tool-id'] || '';
+                const toolResult = parsed['x-tool-result'] || '';
+                if (endToolId) {
+                  completeToolCall(endToolId, toolResult);
+                }
+                break;
+              }
+              case 'content':
+              default: {
+                // Regular content delta
+                if (delta?.content) {
+                  fullContent += delta.content;
+                  updateLastAssistantMessage(fullContent);
+                }
+                break;
+              }
             }
           } catch {
-            // Skip
+            // Skip malformed chunks
           }
         }
       }
@@ -832,7 +1073,7 @@ export function ChatView() {
     } finally {
       setIsStreaming(false);
     }
-  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, addChatMessage, updateLastAssistantMessage, setIsStreaming, setCurrentSessionId, fetchSessions]);
+  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, addChatMessage, updateLastAssistantMessage, appendReasoning, upsertToolCall, completeToolCall, setIsStreaming, setCurrentSessionId, fetchSessions]);
 
   const handleStop = () => {
     abortRef.current?.abort();

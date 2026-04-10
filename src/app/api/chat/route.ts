@@ -267,6 +267,7 @@ export async function POST(request: NextRequest) {
                       object: "chat.completion.chunk",
                       created,
                       model: llmConfig.model,
+                      "x-event-type": "content",
                       choices: [
                         { index: 0, delta: { content: text }, finish_reason: null },
                       ],
@@ -275,7 +276,6 @@ export async function POST(request: NextRequest) {
                   break;
                 }
                 case "reasoning": {
-                  // Pass reasoning as a tool_start event for UI rendering
                   const reasoningText = typeof event.data === "string" ? event.data : String(event.data);
                   writeSSE(
                     JSON.stringify({
@@ -283,10 +283,11 @@ export async function POST(request: NextRequest) {
                       object: "chat.completion.chunk",
                       created,
                       model: llmConfig.model,
+                      "x-event-type": "reasoning",
                       choices: [
                         {
                           index: 0,
-                          delta: { content: `<think:${reasoningText}>` },
+                          delta: { content: reasoningText },
                           finish_reason: null,
                         },
                       ],
@@ -295,35 +296,72 @@ export async function POST(request: NextRequest) {
                   break;
                 }
                 case "tool_start": {
-                  const toolName = typeof event.data === "object" && event.data && "name" in event.data
-                    ? String((event.data as Record<string, unknown>).name)
-                    : String(event.data);
+                  const toolData = event.data;
+                  const toolName = typeof toolData === "object" && toolData && "name" in toolData
+                    ? String((toolData as Record<string, unknown>).name)
+                    : String(toolData);
+                  const toolArgs = typeof toolData === "object" && toolData && "arguments" in toolData
+                    ? String((toolData as Record<string, unknown>).arguments || "")
+                    : "";
+                  const toolId = typeof toolData === "object" && toolData && "id" in toolData
+                    ? String((toolData as Record<string, unknown>).id)
+                    : `tool-${Date.now()}`;
                   writeSSE(
                     JSON.stringify({
                       id: completionId,
                       object: "chat.completion.chunk",
                       created,
                       model: llmConfig.model,
+                      "x-event-type": "tool_start",
+                      "x-tool-id": toolId,
+                      "x-tool-name": toolName,
+                      "x-tool-args": toolArgs,
                       choices: [
-                        {
-                          index: 0,
-                          delta: {
-                            content: `\n🔧 Calling ${toolName}...\n`,
-                          },
-                          finish_reason: null,
-                        },
+                        { index: 0, delta: {}, finish_reason: null },
                       ],
                     }),
                   );
                   break;
                 }
                 case "tool_end": {
-                  // Tool completed — no content delta needed
+                  const toolResult = typeof event.data === "string" ? event.data
+                    : typeof event.data === "object" && event.data ? JSON.stringify(event.data)
+                    : "";
+                  const toolId2 = typeof event.data === "object" && event.data && "id" in event.data
+                    ? String((event.data as Record<string, unknown>).id)
+                    : "";
+                  writeSSE(
+                    JSON.stringify({
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: llmConfig.model,
+                      "x-event-type": "tool_end",
+                      "x-tool-id": toolId2,
+                      "x-tool-result": toolResult,
+                      choices: [
+                        { index: 0, delta: {}, finish_reason: null },
+                      ],
+                    }),
+                  );
                   break;
                 }
                 case "error": {
                   const errorMsg = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
                   console.error("[Chat API] Agent event error:", errorMsg);
+                  writeSSE(
+                    JSON.stringify({
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: llmConfig.model,
+                      "x-event-type": "error",
+                      "x-error": errorMsg,
+                      choices: [
+                        { index: 0, delta: {}, finish_reason: null },
+                      ],
+                    }),
+                  );
                   break;
                 }
                 case "done": {
