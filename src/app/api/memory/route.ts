@@ -79,6 +79,45 @@ export async function POST(request: NextRequest) {
 }
 
 /**
+ * PUT /api/memory
+ * Update a memory entry by id.
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, category, content, tags, source } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "ID is required" }, { status: 400 });
+    }
+
+    const data: Record<string, unknown> = {};
+    if (category !== undefined) data.category = category;
+    if (content !== undefined) data.content = content;
+    if (tags !== undefined) data.tags = Array.isArray(tags) ? tags.join(",") : tags;
+    if (source !== undefined) data.source = source;
+
+    const { db } = await import("@/lib/db");
+    const memory = await db.memoryEntry.update({
+      where: { id },
+      data,
+    });
+
+    return NextResponse.json({
+      id: memory.id,
+      category: memory.category,
+      content: memory.content,
+      tags: memory.tags ? memory.tags.split(",").map((t) => t.trim()) : [],
+      source: memory.source,
+      createdAt: memory.createdAt,
+    });
+  } catch (error) {
+    console.error("[Memory API] PUT error:", error);
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+  }
+}
+
+/**
  * DELETE /api/memory
  * Delete a memory entry by id.
  */

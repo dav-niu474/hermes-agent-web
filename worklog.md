@@ -219,3 +219,60 @@ Input, Badge, Button, ScrollArea, Switch, Label, Textarea, Dialog, DialogContent
 - All state is local (useState) — no backend dependency for this task
 - Framer-motion AnimatePresence with mode="popLayout" for smooth filtering
 - Sonner toast integration for user feedback on skill CRUD operations
+
+---
+
+## Task 7: Hermes Tool Registry (TypeScript)
+
+**Status**: ✅ Completed
+**Date**: 2025-07-09
+
+### Summary
+Created a comprehensive TypeScript tool registry file that mirrors all ~45 hermes-agent tool definitions from the Python source. This provides a single source of truth for the web UI to render tool documentation, parameter forms, category filtering, and toolset grouping.
+
+### File Created
+1. **`src/lib/hermes/tools-registry.ts`** (~1240 lines) — Complete registry with:
+
+#### Exported Interfaces
+- `ToolDefinition` — name, description, category, toolset, emoji, parameters (JSON Schema), isWebCompatible
+- `ToolsetDefinition` — name, description, tools[], emoji, color
+- `CategoryMeta` — label, icon name, color, hex
+
+#### Exported Constants
+- `ALL_TOOLS` — Flat array of 45 tools with full JSON Schema parameters extracted directly from the Python registry (`hermes-agent/tools/*.py`)
+- `ALL_TOOLSETS` — 18 toolset definitions matching `toolsets.py` (web, terminal, file, browser, vision, image_gen, tts, skills, todo, memory, session_search, clarify, code_execution, delegation, messaging, cronjob, homeassistant, rl)
+- `CATEGORIES` — 11 category metadata entries (Web & Search, Terminal & Code, File System, Browser, Vision & Media, Skills, Planning & Memory, Messaging, Automation, Smart Home, RL Training)
+- `TOOL_COUNT` — Total number of registered tools
+
+#### Exported Helper Functions
+- `getToolByName(name)` — O(1) lookup via pre-built `Map`
+- `getToolsByToolset(toolset)` — Filter tools by toolset name
+- `getToolsByCategory(category)` — Filter tools by category name
+- `getToolsets(name?)` — Get all or filtered toolset definitions
+- `getCategoryForToolset(toolset)` — Map toolset → category
+- `getActiveCategories()` — Deduplicated list of categories with tools
+
+#### Tool Schemas (extracted from Python source)
+All tool schemas match the exact JSON Schema from the Python registry:
+- **Web**: web_search, web_extract
+- **Terminal**: terminal (with background/pty/workdir/timeout), process (7 actions)
+- **Code**: execute_code, delegate_task (batch mode with tasks array)
+- **File**: read_file (pagination, 100K char cap), write_file, patch (replace + V4A modes, fuzzy matching), search_files (content/files targets, ripgrep-backed)
+- **Browser**: browser_navigate, browser_snapshot, browser_click, browser_type, browser_scroll, browser_back, browser_press, browser_close, browser_get_images, browser_vision, browser_console
+- **Vision & Media**: vision_analyze (AI vision), image_generate (FLUX 2 Pro, aspect ratios), text_to_speech
+- **Skills**: skills_list, skill_view (linked files), skill_manage (CRUD + write_file/remove_file)
+- **Planning & Memory**: todo (merge mode), memory (add/replace/remove, user/memory targets), session_search (FTS5 with OR syntax), clarify (multiple choice + open-ended)
+- **Messaging**: send_message (multi-platform targets)
+- **Automation**: cronjob (create/list/update/pause/resume/remove/run with model override)
+- **Smart Home**: ha_list_entities, ha_get_state, ha_list_services, ha_call_service
+- **RL Training**: rl_list_environments, rl_select_environment, rl_get_current_config, rl_edit_config, rl_start_training, rl_check_status (rate-limited), rl_stop_training, rl_get_results, rl_list_runs, rl_test_inference
+
+#### Web Compatibility
+10 tools marked `isWebCompatible: true`: web_search, web_extract, vision_analyze, image_generate, text_to_speech, skills_list, skill_view, memory, session_search, clarify. All other tools require CLI/local environment access.
+
+### Technical Notes
+- ESLint: zero new errors (all 5 errors are pre-existing in hermes-agent/)
+- No `downlevelIteration` issues (used `Array.from()` instead of spread on Set)
+- TypeScript strict mode compatible
+- File is purely declarative (no side effects) — safe for tree-shaking
+- Descriptions are copied verbatim from the Python tool schemas for accuracy
