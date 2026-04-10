@@ -1,57 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+import { getLLMConfig, loadConfig, updateConfig } from "@/lib/hermes";
 
 /**
  * GET /api/config
- * Fetch hermes-agent configuration from hermes-api.
+ *
+ * Return hermes-agent configuration from the embedded config system.
  */
 export async function GET() {
   try {
-    const hermesResponse = await fetch(`${HERMES_API}/v1/config`);
+    const config = loadConfig();
+    const llmConfig = getLLMConfig();
 
-    if (!hermesResponse.ok) {
-      console.error("[Config API] hermes-api error:", hermesResponse.status);
-      return NextResponse.json({});
-    }
-
-    const data = await hermesResponse.json();
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...config,
+      llm: {
+        model: llmConfig.model,
+        provider: llmConfig.provider,
+        baseUrl: llmConfig.baseUrl,
+        hasApiKey: !!llmConfig.apiKey,
+        apiMode: llmConfig.apiMode,
+        source: llmConfig.source,
+      },
+    });
   } catch (error) {
-    console.error("[Config API] Error:", error);
+    console.error("[Config API] GET Error:", error);
     return NextResponse.json({});
   }
 }
 
 /**
  * PUT /api/config
- * Update configuration via hermes-api /v1/config.
+ *
+ * Update hermes-agent configuration via the embedded config system.
  */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const hermesResponse = await fetch(`${HERMES_API}/v1/config`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const updated = updateConfig(body);
+
+    return NextResponse.json({
+      success: true,
+      config: updated,
     });
-
-    if (hermesResponse.ok) {
-      const data = await hermesResponse.json();
-      return NextResponse.json(data);
-    }
-
-    const errorText = await hermesResponse.text().catch(() => "Unknown error");
-    console.error("[Config API] hermes-api error:", hermesResponse.status, errorText);
-    return NextResponse.json(
-      { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
-      { status: hermesResponse.status },
-    );
   } catch (error) {
-    console.error("[Config API] Error:", error);
+    console.error("[Config API] PUT Error:", error);
     return NextResponse.json(
-      { error: "Failed to update config via hermes-api" },
+      { error: "Failed to update config" },
       { status: 500 },
     );
   }

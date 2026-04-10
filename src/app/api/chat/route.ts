@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import {
+  AgentLoop,
+  type AgentConfig,
+  type AgentMessage,
+  type SSEEvent,
+  type ToolContext,
+ type ToolRegistryInterface,
+ type MemoryManagerInterface,
+ getLLMConfig,
+ resolveToolset,
+ MemoryManager,
+ ALL_TOOLS,
+ getToolsetFilter,
+} from "@/lib/hermes";
+import OpenAI from "openai";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +40,83 @@ function generateTitle(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — proxy to hermes-api /v1/chat/completions
+// ToolRegistryAdapter — wraps static tool definitions for AgentLoop
+// ---------------------------------------------------------------------------
+
+class ToolRegistryAdapter implements ToolRegistryInterface {
+  private toolNames: Set<string>;
+  private toolSchemas: OpenAI.ChatCompletionTool[];
+
+  constructor(toolNames: string[]) {
+    this.toolNames = new Set(toolNames);
+    this.toolSchemas = ALL_TOOLS
+      .filter((t) => this.toolNames.has(t.name))
+      .map((t) => ({
+        type: "function" as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters as Record<string, unknown>,
+        },
+      }));
+  }
+
+  getToolDefinitions(): OpenAI.ChatCompletionTool[] {
+    return this.toolSchemas;
+  }
+
+  getValidToolNames(): Set<string> {
+    return this.toolNames;
+  }
+
+  async dispatch(
+    name: string,
+    _args: Record<string, unknown>,
+    _context: ToolContext,
+  ): Promise<string> {
+    // In the web context, tools are dispatched client-side or not at all.
+    // The agent loop uses this for tool definitions; actual tool execution
+    // happens in the hermes-agent runtime. For the web API server, we
+    // return a descriptive placeholder so the LLM can explain what it
+    // would do. The frontend can then render tool-call UI elements.
+    return JSON.stringify({
+      note: `Tool '${name}' is registered but not executable in the web API context. The agent described the intended action above.`,
+      tool: name,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryManagerAdapter — wraps MemoryManager for AgentLoop
+// ---------------------------------------------------------------------------
+
+class MemoryManagerAdapter implements MemoryManagerInterface {
+  private mm: MemoryManager;
+
+  constructor(mm: MemoryManager) {
+    this.mm = mm;
+  }
+
+  async getMemoryContext(_query?: string): Promise<string> {
+    try {
+      const data = await this.mm.readMemory();
+      // Build a compact memory context for the system prompt
+      const parts: string[] = [];
+      if (data.memoryContent?.trim()) {
+        parts.push(`## Agent Memory\n${data.memoryContent}`);
+      }
+      if (data.userContent?.trim()) {
+        parts.push(`## User Profile\n${data.userContent}`);
+      }
+      return parts.join("\n\n");
+    } catch {
+      return "";
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/chat — run AgentLoop with optional SSE streaming
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -63,7 +154,6 @@ export async function POST(request: NextRequest) {
         .catch(() => null);
       localSessionId = newSession?.id;
     } else {
-      // Update model if changed
       if (body.model) {
         await db.chatSession
           .update({
@@ -74,25 +164,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Build request to hermes-api ──
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    // ── Resolve LLM config ──
+    const requestModel = body.model && body.model.includes("/")
+      ? body.model
+      : undefined;
+    const llmConfig = getLLMConfig(requestModel);
 
-    // Forward X-Hermes-Session-Id if present
-    const hermesSessionId = request.headers.get("X-Hermes-Session-Id");
-    if (hermesSessionId) {
-      headers["X-Hermes-Session-Id"] = hermesSessionId;
+    // ── Resolve toolset tools ──
+    const toolsetFilter = getToolsetFilter();
+    const toolNames: string[] = [];
+    for (const ts of toolsetFilter.effective) {
+      const resolved = resolveToolset(ts);
+      for (const name of resolved) {
+        if (!toolNames.includes(name)) toolNames.push(name);
+      }
     }
 
-    const requestBody: Record<string, unknown> = {
-      model: body.model || "hermes-agent",
-      messages: body.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      stream: shouldStream,
+    // ── Build components ──
+    const toolRegistry = new ToolRegistryAdapter(toolNames);
+    const memoryManager = new MemoryManager();
+    const memoryAdapter = new MemoryManagerAdapter(memoryManager);
+
+    // ── Agent config ──
+    const agentConfig: AgentConfig = {
+      model: llmConfig.model,
+      provider: llmConfig.provider,
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      platform: "web",
+      maxIterations: 90,
+      sessionId: localSessionId,
     };
+
+    const agentLoop = new AgentLoop(agentConfig, toolRegistry, memoryAdapter);
+
+    // ── Convert messages ──
+    const agentMessages: AgentMessage[] = body.messages.map((m) => ({
+      role: m.role as AgentMessage["role"],
+      content: m.content,
+    }));
 
     // ── Save user message locally ──
     if (localSessionId) {
@@ -114,82 +224,152 @@ export async function POST(request: NextRequest) {
         .catch(() => {});
     }
 
-    // ── Call hermes-api ──
-    const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
-    const hermesResponse = await fetch(
-      `${HERMES_API}/v1/chat/completions`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(requestBody),
-      },
-    );
+    // ── Handle X-Hermes-Session-Id ──
+    const hermesSessionId = request.headers.get("X-Hermes-Session-Id");
 
-    if (!hermesResponse.ok) {
-      const errorText = await hermesResponse.text().catch(() => "Unknown error");
-      console.error("[Chat API] hermes-api error:", hermesResponse.status, errorText);
-      return NextResponse.json(
-        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
-        { status: hermesResponse.status },
-      );
-    }
+    // ── Generate a completion ID ──
+    const completionId = `chatcmpl-${Date.now().toString(36)}`;
+    const created = Math.floor(Date.now() / 1000);
 
-    // ── Streaming response: pipe SSE transparently ──
-    if (shouldStream && hermesResponse.body) {
+    // ── Run agent loop ──
+    if (shouldStream) {
+      // ── Streaming response ──
       const stream = new TransformStream();
       const writer = stream.writable.getWriter();
       const encoder = new TextEncoder();
 
+      // Helper to write an SSE data line
+      const writeSSE = (data: string) => writer.write(encoder.encode(`data: ${data}\n\n`));
+
       (async () => {
-        const reader = hermesResponse.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         let fullContent = "";
-        let totalTokens = 0;
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
 
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith("data:")) continue;
-
-              const data = trimmed.slice(5).trim();
-              if (data === "[DONE]") {
-                await writer.write(encoder.encode("data: [DONE]\n\n"));
-                continue;
-              }
-
-              try {
-                const parsed = JSON.parse(data);
-                const delta = parsed.choices?.[0]?.delta;
-                if (delta?.content) {
-                  fullContent += delta.content;
+          const result = await agentLoop.run(agentMessages, {
+            stream: true,
+            sessionId: localSessionId,
+            onEvent: (event: SSEEvent) => {
+              switch (event.type) {
+                case "delta": {
+                  const text = typeof event.data === "string" ? event.data : String(event.data);
+                  fullContent += text;
+                  writeSSE(
+                    JSON.stringify({
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: llmConfig.model,
+                      choices: [
+                        { index: 0, delta: { content: text }, finish_reason: null },
+                      ],
+                    }),
+                  );
+                  break;
                 }
-
-                // Track token usage
-                if (parsed.usage) {
-                  totalTokens = parsed.usage.total_tokens || 0;
+                case "reasoning": {
+                  // Pass reasoning as a tool_start event for UI rendering
+                  const reasoningText = typeof event.data === "string" ? event.data : String(event.data);
+                  writeSSE(
+                    JSON.stringify({
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: llmConfig.model,
+                      choices: [
+                        {
+                          index: 0,
+                          delta: { content: `<think:${reasoningText}>` },
+                          finish_reason: null,
+                        },
+                      ],
+                    }),
+                  );
+                  break;
                 }
-
-                // Pipe the chunk transparently
-                await writer.write(encoder.encode(`data: ${data}\n\n`));
-              } catch {
-                // Skip malformed JSON chunks — pipe them as-is
-                await writer.write(encoder.encode(`${line}\n`));
+                case "tool_start": {
+                  const toolName = typeof event.data === "object" && event.data && "name" in event.data
+                    ? String((event.data as Record<string, unknown>).name)
+                    : String(event.data);
+                  writeSSE(
+                    JSON.stringify({
+                      id: completionId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: llmConfig.model,
+                      choices: [
+                        {
+                          index: 0,
+                          delta: {
+                            content: `\n🔧 Calling ${toolName}...\n`,
+                          },
+                          finish_reason: null,
+                        },
+                      ],
+                    }),
+                  );
+                  break;
+                }
+                case "tool_end": {
+                  // Tool completed — no content delta needed
+                  break;
+                }
+                case "error": {
+                  const errorMsg = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+                  console.error("[Chat API] Agent event error:", errorMsg);
+                  break;
+                }
+                case "done": {
+                  // Will be handled after run() resolves
+                  break;
+                }
               }
-            }
-          }
+            },
+          });
+
+          totalInputTokens = result.usage.inputTokens;
+          totalOutputTokens = result.usage.outputTokens;
+
+          // Send final stop chunk
+          writeSSE(
+            JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model: llmConfig.model,
+              choices: [
+                { index: 0, delta: {}, finish_reason: "stop" },
+              ],
+              usage: {
+                prompt_tokens: totalInputTokens,
+                completion_tokens: totalOutputTokens,
+                total_tokens: totalInputTokens + totalOutputTokens,
+              },
+            }),
+          );
+          writeSSE("[DONE]");
         } catch (error) {
-          console.error("[Chat API] Stream error:", error);
+          console.error("[Chat API] Agent loop error:", error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          writeSSE(
+            JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model: llmConfig.model,
+              choices: [
+                {
+                  index: 0,
+                  delta: { content: `\n\n⚠️ Error: ${errorMsg}` },
+                  finish_reason: "stop",
+                },
+              ],
+            }),
+          );
+          writeSSE("[DONE]");
         } finally {
-          // Save assistant message to local DB after stream completes
+          // Save assistant message to local DB
           if (localSessionId && fullContent) {
             const duration = Date.now() - startTime;
             await db.chatMessage
@@ -199,7 +379,7 @@ export async function POST(request: NextRequest) {
                   role: "assistant",
                   content: fullContent,
                   duration,
-                  tokens: totalTokens || undefined,
+                  tokens: totalInputTokens + totalOutputTokens || undefined,
                 },
               })
               .catch(() => {});
@@ -215,20 +395,18 @@ export async function POST(request: NextRequest) {
         }
       })();
 
-      // Build response headers — forward any useful ones from hermes-api
+      // Build response headers
       const responseHeaders: Record<string, string> = {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "X-Session-Id": localSessionId || "",
+        "X-Model": llmConfig.model,
       };
 
-      // Forward hermes session ID if returned
-      const hermesSid = hermesResponse.headers.get("X-Hermes-Session-Id");
-      if (hermesSid) responseHeaders["X-Hermes-Session-Id"] = hermesSid;
-
-      const hermesModel = hermesResponse.headers.get("X-Model");
-      if (hermesModel) responseHeaders["X-Model"] = hermesModel;
+      if (hermesSessionId) {
+        responseHeaders["X-Hermes-Session-Id"] = hermesSessionId;
+      }
 
       return new NextResponse(stream.readable, {
         headers: responseHeaders,
@@ -236,10 +414,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Non-streaming response ──
-    const data = await hermesResponse.json();
+    const result = await agentLoop.run(agentMessages, {
+      stream: false,
+      sessionId: localSessionId,
+    });
+
     const duration = Date.now() - startTime;
-    const content = data.choices?.[0]?.message?.content || "";
-    const totalTokens = data.usage?.total_tokens;
+    const content = result.finalResponse || "";
+    const totalTokens = result.usage.totalTokens;
 
     // Save assistant message to local DB
     if (localSessionId && content) {
@@ -250,15 +432,33 @@ export async function POST(request: NextRequest) {
             role: "assistant",
             content,
             duration,
-            tokens: totalTokens,
+            tokens: totalTokens || undefined,
           },
         })
         .catch(() => {});
     }
 
-    // Return hermes-api response with local session metadata
+    // Return OpenAI-compatible response
     return NextResponse.json({
-      ...data,
+      id: completionId,
+      object: "chat.completion",
+      created,
+      model: llmConfig.model,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content,
+          },
+          finish_reason: result.finishedNaturally ? "stop" : "length",
+        },
+      ],
+      usage: {
+        prompt_tokens: result.usage.inputTokens,
+        completion_tokens: result.usage.outputTokens,
+        total_tokens: result.usage.totalTokens,
+      },
       sessionId: localSessionId,
       duration,
     });

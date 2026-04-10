@@ -397,3 +397,94 @@ Browser → Next.js API Routes → hermes-api (Python, port 8643)
                                 ├── Config: ~/.hermes/config.yaml + env vars
                                 └── LLM Provider: NVIDIA NIM (OpenAI-compatible API)
 ```
+
+---
+
+## Task 9: Hermes Agent Loop & Prompt Builder (TypeScript Core)
+
+**Status**: ✅ Completed
+**Date**: 2025-07-11
+
+### Summary
+Implemented the core agent loop and system prompt builder in TypeScript, faithfully porting the hermes-agent Python tool-calling loop (`run_agent.py` / `agent_loop.py`) and prompt assembly system (`prompt_builder.py`). These two files form the runtime backbone that drives the entire agent lifecycle on the Next.js backend.
+
+### Files Created
+
+#### 1. `src/lib/hermes/prompt-builder.ts` (~250 lines)
+
+**Exported Constants** (all ported verbatim from Python):
+- `DEFAULT_AGENT_IDENTITY` — Default agent persona when SOUL.md is absent
+- `MEMORY_GUIDANCE` — Injected when `memory` tool is available
+- `SESSION_SEARCH_GUIDANCE` — Injected when `session_search` tool is available
+- `SKILLS_GUIDANCE` — Injected when `skill_manage` tool is available
+- `TOOL_USE_ENFORCEMENT_GUIDANCE` — Forces model to call tools instead of describing actions
+- `TOOL_USE_ENFORCEMENT_MODELS` — Model name substrings that trigger enforcement (gpt, codex, gemini, gemma, grok)
+- `OPENAI_MODEL_EXECUTION_GUIDANCE` — GPT/Codex-specific execution discipline
+- `GOOGLE_MODEL_OPERATIONAL_GUIDANCE` — Gemini/Gemma operational directives
+- `PLATFORM_HINTS` — Platform-specific formatting hints (whatsapp, telegram, discord, slack, signal, email, cron, cli, sms, web, api_server)
+
+**Exported Functions**:
+- `buildSystemPrompt(options)` — Assembles the complete system prompt from all 8 layers:
+  1. Agent identity (SOUL.md or DEFAULT_AGENT_IDENTITY)
+  2. Tool-aware behavioral guidance (memory, session_search, skills)
+  3. Tool-use enforcement (model-dependent)
+  4. User/gateway system message
+  5. Memory context block
+  6. Skills index
+  7. Timestamp + session metadata
+  8. Platform-specific formatting hint
+
+#### 2. `src/lib/hermes/agent-loop.ts` (~680 lines)
+
+**Exported Types**:
+- `AgentConfig` — Model, maxIterations, platform, apiKey, baseUrl, toolset filtering
+- `ToolCall` — id, type, function.name, function.arguments (OpenAI format)
+- `AgentMessage` — role, content, tool_calls?, tool_call_id?, reasoning_content?
+- `SSEEvent` — type (delta|tool_start|tool_end|reasoning|done|error), data
+- `TokenUsage` — inputTokens, outputTokens, totalTokens
+- `AgentResult` — messages, finalResponse, turnsUsed, finishedNaturally, usage
+- `ToolRegistry` — Interface for getToolDefinitions(), getValidToolNames(), dispatch()
+- `ToolContext` — taskId, userTask, sessionId
+- `MemoryManager` — Interface for getMemoryContext()
+- `IterationBudget` — Thread-safe iteration counter with consume(), refund(), remaining
+
+**AgentLoop Class** — The core agent loop implementation:
+- `constructor(config, toolRegistry, memoryManager?)` — Initialises with config, tool registry, and optional memory manager
+- `run(messages, options?)` — Main entry point. Executes the full agent loop:
+  1. Reset iteration budget
+  2. Build/cached system prompt
+  3. Prefetch memory context once
+  4. Loop: LLM call → check tool_calls → execute tools → append results → repeat
+  5. Return final response when model stops calling tools
+- `buildSystemPrompt()` — Delegates to prompt-builder.ts
+- `executeToolCall(toolCall, context)` — Single tool dispatch
+- `handleReasoningContent(content)` — Wraps GLM reasoning in `<think: ...>` tags
+
+**Core Loop Features** (all ported from Python):
+- **Iteration budget** — Max 90 iterations by default, with two-tier warnings:
+  - 70% caution: "Start consolidating your work"
+  - 90% warning: "Provide your final response NOW"
+- **Parallel tool execution** — Read-only tools (web_search, read_file, search_files, etc.) run concurrently when batched; path-scoped tools (read_file, write_file, patch) checked for path overlap; interactive tools (clarify) always sequential
+- **Sequential execution fallback** — For single tool calls, interactive tools, or when path overlap detected
+- **Budget pressure injection** — Warnings injected into last tool-result JSON `_budget_warning` key or appended as text
+- **Streaming support** — Accumulates deltas from OpenAI streaming API, fires SSE events for content deltas, reasoning, tool start/end, errors, and completion
+- **Surrogate sanitisation** — Strips invalid UTF-8 surrogate code points that crash JSON.stringify
+- **Reasoning content handling** — Extracts `reasoning_content` from GLM/OpenRouter models, passes through for multi-turn continuity
+- **Error recovery** — Invalid tool JSON → injects error result → model can retry; unknown tool names → descriptive error with available tools list
+
+**Internal Helpers**:
+- `callLLM(messages, stream?, onEvent?)` — Creates OpenAI client from config, handles both streaming and non-streaming paths
+- `prepareApiMessages(messages, systemPrompt, memoryBlock)` — Prepends system prompt, sanitises reasoning_content, strips internal fields
+- `validateToolCallArguments(toolCalls)` — Validates JSON argument strings, normalises empty args to `{}`
+- `executeToolCallsParallel()` — Concurrent execution with MAX_TOOL_WORKERS=8 cap
+- `executeToolCallsSequential()` — Sequential with per-tool error handling
+- `shouldParallelizeToolBatch()` — Mirrors Python's `_should_parallelize_tool_batch()`
+- `getBudgetWarning()` / `injectBudgetWarning()` — Two-tier budget pressure system
+
+### Technical Notes
+- ESLint: zero new errors in `src/lib/hermes/` (all 5 errors are pre-existing in `hermes-agent/`)
+- Dev server compiles successfully — no TypeScript errors
+- Uses `openai` npm package for LLM API calls (both streaming and non-streaming)
+- Server-side code — no 'use client' directive; intended for API route usage
+- ToolRegistry and MemoryManager are interface-based — consumers provide implementations
+- System prompt is cached per AgentLoop instance (rebuilt only if `buildSystemPrompt()` is called again)

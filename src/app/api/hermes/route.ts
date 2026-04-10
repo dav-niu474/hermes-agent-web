@@ -1,73 +1,115 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-
-const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+import {
+  getLLMConfig,
+  getHermesHome,
+  getToolsetFilter,
+  resolveToolset,
+  TOOLSETS,
+} from "@/lib/hermes";
+import { detectAvailableProviders } from "@/lib/hermes/config";
 
 /**
  * GET /api/hermes
- * Check hermes-api (mini-service on port 8643) health, models, and config.
+ *
+ * Return connection status, config, model info, and toolset availability.
+ * All data is local — no proxying to external services.
  */
 export async function GET() {
   try {
-    // Health, models, and config in parallel
-    const [healthResult, modelsResult, configResult] = await Promise.allSettled([
-      fetch(`${HERMES_API}/health`, {
-        signal: AbortSignal.timeout(5000),
-      }).then((r) => r.json()),
-      fetch(`${HERMES_API}/v1/models`, {
-        signal: AbortSignal.timeout(8000),
-      }).then((r) => r.json()),
-      fetch(`${HERMES_API}/v1/config`, {
-        signal: AbortSignal.timeout(5000),
-      }).then((r) => r.json()),
-    ]);
-
-    let healthStatus: "connected" | "disconnected" | "error" = "disconnected";
-    let healthData: unknown = null;
-
-    if (healthResult.status === "fulfilled" && healthResult.value?.status === "ok") {
-      healthStatus = "connected";
-      healthData = healthResult.value;
-    } else if (healthResult.status === "rejected") {
-      healthStatus = "error";
-    }
-
-    let models: { id: string; owned_by: string }[] = [];
-    if (modelsResult.status === "fulfilled" && modelsResult.value?.data) {
-      models = modelsResult.value.data.map(
-        (m: { id: string; owned_by?: string }) => ({
-          id: m.id,
-          owned_by: m.owned_by || "hermes",
-        }),
-      );
-    }
-
+    let status: "connected" | "disconnected" | "error" = "connected";
     let configData: unknown = null;
-    if (configResult.status === "fulfilled") {
-      configData = configResult.value;
+    let models: { id: string; owned_by: string }[] = [];
+
+    try {
+      const llmConfig = getLLMConfig();
+      configData = {
+        model: llmConfig.model,
+        provider: llmConfig.provider,
+        baseUrl: llmConfig.baseUrl,
+        hasApiKey: !!llmConfig.apiKey,
+        apiMode: llmConfig.apiMode,
+        source: llmConfig.source,
+      };
+
+      models = [
+        {
+          id: llmConfig.model,
+          owned_by: llmConfig.provider,
+        },
+      ];
+
+      // Check if there's actually an API key configured
+      if (!llmConfig.apiKey) {
+        status = "disconnected";
+      }
+    } catch {
+      status = "error";
+    }
+
+    // Get available providers
+    let availableProviders: string[] = [];
+    try {
+      availableProviders = detectAvailableProviders();
+    } catch {
+      // ignore
+    }
+
+    // Get toolset info
+    const toolsets: Record<string, { available: boolean; tools: string[]; description: string }> = {};
+    try {
+      const filter = getToolsetFilter();
+      for (const ts of filter.effective) {
+        const resolved = resolveToolset(ts);
+        const def = TOOLSETS[ts];
+        toolsets[ts] = {
+          available: true,
+          tools: resolved,
+          description: def?.description || "",
+        };
+      }
+    } catch {
+      // ignore
+    }
+
+    // Get hermes home
+    let hermesHome = "";
+    try {
+      hermesHome = getHermesHome();
+    } catch {
+      // ignore
     }
 
     return NextResponse.json({
-      status: healthStatus,
-      health: healthData,
-      models,
+      status,
       config: configData,
+      models,
+      availableProviders,
+      toolsets,
+      hermesHome,
+      health: {
+        status: "ok",
+        version: "embedded",
+        mode: "local",
+      },
     });
   } catch (error) {
-    console.error("[Hermes API] Error:", error);
+    console.error("[Hermes API] GET Error:", error);
     return NextResponse.json({
       status: "error",
       health: null,
       models: [],
       config: null,
-      error: "Failed to connect to Hermes API service",
+      error: "Failed to load Hermes configuration",
     });
   }
 }
 
 /**
  * PUT /api/hermes
- * Save hermes connection config to local DB and optionally forward to hermes-api config.
+ *
+ * Save hermes connection config to local DB.
+ * No proxying needed — all config is local now.
  */
 export async function PUT(request: NextRequest) {
   try {
@@ -101,22 +143,9 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    // Forward config to hermes-api if config payload is present
-    if (body.config && typeof body.config === "object") {
-      try {
-        await fetch(`${HERMES_API}/v1/config`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body.config),
-        });
-      } catch (forwardError) {
-        console.warn("[Hermes API] Failed to forward config to hermes-api:", forwardError);
-      }
-    }
-
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[Hermes API] PUT error:", error);
+    console.error("[Hermes API] PUT Error:", error);
     return NextResponse.json(
       { error: "Failed to save config" },
       { status: 503 },

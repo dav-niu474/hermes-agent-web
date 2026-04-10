@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+import { scanSkills } from "@/lib/hermes";
 
 /**
  * GET /api/skills
- * Fetch skills from hermes-api with optional ?category=, ?search= filters.
+ *
+ * Scan hermes-agent skill directories and return skill metadata.
+ * Supports ?category=, ?search= filters.
+ *
+ * Response shape matches the old hermes-api response.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -12,28 +15,31 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category");
     const search = searchParams.get("search");
 
-    // Build query string for hermes-api
-    const params = new URLSearchParams();
-    if (category) params.set("category", category);
-    if (search) params.set("search", search);
+    const skills = await scanSkills({
+      category: category || undefined,
+      search: search || undefined,
+    });
 
-    const hermesResponse = await fetch(`${HERMES_API}/v1/skills?${params.toString()}`);
+    // Extract unique categories
+    const categories = [...new Set(skills.map((s) => s.category).filter(Boolean))];
 
-    if (!hermesResponse.ok) {
-      const errorText = await hermesResponse.text().catch(() => "Unknown error");
-      console.error("[Skills API] hermes-api error:", hermesResponse.status, errorText);
-      return NextResponse.json(
-        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
-        { status: hermesResponse.status },
-      );
-    }
-
-    const data = await hermesResponse.json();
-    return NextResponse.json(data);
+    return NextResponse.json({
+      skills: skills.map((s) => ({
+        name: s.name,
+        category: s.category,
+        description: s.description,
+        tags: s.tags,
+        isBuiltin: s.isBuiltin,
+        status: s.status,
+        platforms: s.platforms,
+      })),
+      total: skills.length,
+      categories,
+    });
   } catch (error) {
     console.error("[Skills API] Error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch skills from hermes-api" },
+      { error: "Failed to scan skills" },
       { status: 500 },
     );
   }
