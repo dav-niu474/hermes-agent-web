@@ -636,3 +636,26 @@ Stage Summary:
 - Mobile fix: touch-action and webkit-overflow-scrolling
 - Smart scroll: detects manual scroll, shows scroll-to-bottom button
 - Pushed as commit 42c1f19
+---
+Task ID: 1
+Agent: Main Agent
+Task: Check and fix all NVIDIA NIM provider models
+
+Work Log:
+- Read current MODEL_GROUPS in chat-view.tsx and provider routing in config.ts
+- Discovered critical bug: /api/chat route only passed models with "/" to getLLMConfig, silently ignoring models like gpt-4o, claude-sonnet-4, etc.
+- Queried NVIDIA NIM API /v1/models to verify exact model IDs
+- Found GLM model IDs were wrong: `z-ai/glm-4.7` → should be `z-ai/glm4.7`, `z-ai/glm-5` → should be `z-ai/glm5`
+- Found `nvidia/nemotron-4-340b-instruct` returns 404 (deprecated endpoint)
+- Tested all 7 NVIDIA NIM models: 5 working, 2 reasoning models (glm4.7, glm5) slow but available in catalog
+
+Stage Summary:
+- Fixed GLM model IDs to match NVIDIA NIM catalog (removed erroneous dashes)
+- Replaced deprecated `nvidia/nemotron-4-340b-instruct` with `nvidia/llama-3.3-nemotron-super-49b-v1`
+- Added MODEL_PROVIDER_MAP in config.ts with 70+ model→provider mappings for auto-detection
+- Added detectProviderFromModel() function with explicit map + heuristic fallbacks
+- Updated getLLMConfig() to be model-aware (resolves provider from model name)
+- Updated /api/chat to accept and pass provider field alongside model
+- Updated frontend chat-view.tsx to send provider field in chat requests
+- Increased provider timeout from 120s to 180s for GLM reasoning models
+- Pushed to GitHub (commit 77917e6) and verified Vercel deployment works
