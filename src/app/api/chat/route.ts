@@ -17,42 +17,20 @@ interface ModelConfig {
 }
 
 const MODEL_REGISTRY: ModelConfig[] = [
-  // ── GLM 系列 ──
+  // ── GLM 系列 (NVIDIA NIM) ──
   {
-    id: "glm-4-plus",
-    label: "GLM 4.7 (Plus)",
-    provider: "openai-compatible",
-    baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    apiKeyEnv: "GLM_API_KEY",
-  },
-  {
-    id: "glm-4-plus-thinking",
-    label: "GLM 4.7 Thinking",
-    provider: "openai-compatible",
-    baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    apiKeyEnv: "GLM_API_KEY",
-  },
-  {
-    id: "glm-5-plus",
+    id: "z-ai/glm5",
     label: "GLM 5",
     provider: "openai-compatible",
-    baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    apiKeyEnv: "GLM_API_KEY",
-  },
-  // ── Kimi 系列 ──
-  {
-    id: "moonshot-v1-128k",
-    label: "Kimi 2.5 (128K)",
-    provider: "openai-compatible",
-    baseURL: "https://api.moonshot.cn/v1",
-    apiKeyEnv: "KIMI_API_KEY",
+    baseURL: NVIDIA_API_URL,
+    apiKey: "nvidia",
   },
   {
-    id: "moonshot-v1-auto",
-    label: "Kimi 2.5 Auto",
+    id: "z-ai/glm4.7",
+    label: "GLM 4.7 (Thinking)",
     provider: "openai-compatible",
-    baseURL: "https://api.moonshot.cn/v1",
-    apiKeyEnv: "KIMI_API_KEY",
+    baseURL: NVIDIA_API_URL,
+    apiKey: "nvidia",
   },
   // ── NVIDIA 系列 ──
   {
@@ -92,7 +70,7 @@ const MODEL_REGISTRY: ModelConfig[] = [
   },
 ];
 
-const DEFAULT_MODEL = "glm-5-plus";
+const DEFAULT_MODEL = "z-ai/glm5";
 
 function getModelConfig(modelId: string): ModelConfig {
   return MODEL_REGISTRY.find((m) => m.id === modelId) || MODEL_REGISTRY[0];
@@ -299,11 +277,19 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     const duration = Date.now() - startTime;
 
+    // Handle reasoning models (e.g. GLM4.7) that return reasoning_content
+    const msg = data.choices?.[0]?.message || {};
+    const reasoningContent = msg.reasoning_content || "";
+    const content = msg.content || "";
+
     if (sessionId) {
-      const content = data.choices?.[0]?.message?.content || "";
+      // Merge reasoning + content for display, but keep raw for DB
+      const fullContent = reasoningContent
+        ? `**[Thinking]**\\n${reasoningContent}\\n\\n---\\n\\n${content}`
+        : content;
       await db.chatMessage
         .create({
-          data: { sessionId, role: "assistant", content, duration, tokens: data.usage?.total_tokens },
+          data: { sessionId, role: "assistant", content: fullContent, duration, tokens: data.usage?.total_tokens },
         })
         .catch(() => {});
 
@@ -318,6 +304,7 @@ export async function POST(request: NextRequest) {
       model: modelConfig.id,
       sessionId,
       duration,
+      reasoningContent: reasoningContent || undefined,
     });
   } catch (error) {
     console.error("[Chat API] Error:", error);

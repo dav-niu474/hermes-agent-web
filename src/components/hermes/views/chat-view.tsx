@@ -65,17 +65,14 @@ const MODEL_GROUPS = [
   {
     label: '⭐ 常用推荐',
     models: [
-      { id: 'glm-5-plus', name: 'GLM 5 ⭐' },
-      { id: 'glm-4-plus', name: 'GLM 4.7' },
-      { id: 'glm-4-plus-thinking', name: 'GLM 4.7 Thinking' },
-      { id: 'moonshot-v1-128k', name: 'Kimi 2.5 (128K)' },
-      { id: 'moonshot-v1-auto', name: 'Kimi 2.5 Auto' },
+      { id: 'z-ai/glm5', name: 'GLM 5 ⭐' },
+      { id: 'z-ai/glm4.7', name: 'GLM 4.7 Thinking' },
+      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B' },
     ],
   },
   {
     label: 'NVIDIA 系列',
     models: [
-      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B' },
       { id: 'nvidia/llama-3.1-nemotron-ultra-253b', name: 'Nemotron Ultra 253B' },
       { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B' },
       { id: 'nvidia/deepseek-llama3.1-8b-instruct', name: 'DeepSeek Llama 8B' },

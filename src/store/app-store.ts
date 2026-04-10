@@ -91,7 +91,7 @@ export const useAppStore = create<AppState>((set) => ({
   hermesUrl: 'http://localhost:8642',
   setHermesUrl: (url) => set({ hermesUrl: url }),
 
-  selectedModel: 'glm-5-plus',
+  selectedModel: 'z-ai/glm5',
   setSelectedModel: (model) => set({ selectedModel: model }),
   availableModels: [],
   setAvailableModels: (models) => set({ availableModels: models }),
