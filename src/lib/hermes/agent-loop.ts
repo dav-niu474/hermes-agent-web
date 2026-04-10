@@ -959,6 +959,7 @@ export class AgentLoop {
       onEvent?.({
         type: "tool_start",
         data: {
+          id: tc.id,
           index: i,
           name: toolName,
           arguments: tc.function.arguments,
@@ -990,7 +991,7 @@ export class AgentLoop {
           });
           onEvent?.({
             type: "tool_end",
-            data: { index: i, name: toolName, result },
+            data: { id: tc.id, index: i, name: toolName, result },
           });
           continue;
         }
@@ -1006,7 +1007,7 @@ export class AgentLoop {
 
       onEvent?.({
         type: "tool_end",
-        data: { index: i, name: toolName, result },
+        data: { id: tc.id, index: i, name: toolName, result },
       });
     }
   }
@@ -1029,6 +1030,7 @@ export class AgentLoop {
       onEvent?.({
         type: "tool_start",
         data: {
+          id: tc.id,
           index: i,
           name: tc.function.name,
           arguments: tc.function.arguments,
@@ -1082,7 +1084,7 @@ export class AgentLoop {
 
       onEvent?.({
         type: "tool_end",
-        data: { index: i, name: toolCalls[i].function.name, result },
+        data: { id: toolCalls[i].id, index: i, name: toolCalls[i].function.name, result },
       });
     }
   }

@@ -419,7 +419,7 @@
   @apply my-4 border-border;
 }
 
-/* Streaming text cursor */
+/* Streaming text cursor — only applies when active (parent is present) */
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
@@ -428,6 +428,35 @@
   content: '▋';
   animation: blink 1s infinite;
   color: var(--primary);
+}
+
+/* Pulsing dots animation for running tool calls */
+@keyframes pulse-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.75); }
+  40% { opacity: 1; transform: scale(1); }
+}
+.tool-running-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.tool-running-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  animation: pulse-dot 1.4s infinite ease-in-out both;
+}
+.tool-running-dots span:nth-child(1) { animation-delay: -0.32s; }
+.tool-running-dots span:nth-child(2) { animation-delay: -0.16s; }
+.tool-running-dots span:nth-child(3) { animation-delay: 0s; }
+
+/* Pulse border animation for running tool cards */
+@keyframes border-pulse-amber {
+  0%, 100% { border-color: oklch(0.85 0.08 85 / 50%); }
+  50% { border-color: oklch(0.75 0.15 75 / 70%); }
+}
+.tool-card-running {
+  animation: border-pulse-amber 2s ease-in-out infinite;
 }
 
 /* Glow effect for status indicator */

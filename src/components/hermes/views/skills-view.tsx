@@ -25,6 +25,9 @@ import {
   RefreshCw,
   Trash2,
   AlertTriangle,
+  FileText,
+  ChevronDown,
+  ChevronUp,
   type LucideIcon,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -113,18 +116,187 @@ function getCategoryInfo(catId: string | null): { icon: LucideIcon; color: strin
   return { icon: Layers, color: 'text-muted-foreground', bgColor: 'bg-muted', name: catId };
 }
 
-// ─── Skill Detail Dialog ─────────────────────────────────────────────────────
+// ─── Skill Content Viewer Dialog ─────────────────────────────────────────────
+
+function SkillContentDialog({
+  skill,
+  open,
+  onOpenChange,
+}: {
+  skill: Skill | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    if (open && skill) {
+      requestAnimationFrame(() => setLoading(true));
+      fetch(`/api/skills/${encodeURIComponent(skill.name)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error('Failed to load skill content');
+          return res.json();
+        })
+        .then((data) => {
+          setContent(data.content || 'No content available.');
+        })
+        .catch((err) => {
+          console.error('Failed to load skill content:', err);
+          setContent('Failed to load skill content. The skill may not have a SKILL.md file.');
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [open, skill]);
+
+  if (!skill) return null;
+  const catInfo = getCategoryInfo(skill.category);
+
+  // Split YAML frontmatter from body
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const frontmatter = frontmatterMatch ? frontmatterMatch[1].trim() : '';
+  const body = frontmatterMatch ? frontmatterMatch[2].trim() : content;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className={cn('p-2 rounded-lg', catInfo.bgColor)}>
+              <catInfo.icon className={cn('size-5', catInfo.color)} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <DialogTitle className="text-base flex items-center gap-2">
+                {skill.name}
+                {skill.isBuiltin ? (
+                  <Badge variant="outline" className="text-[10px] gap-0.5 font-normal">
+                    <Star className="size-2.5" /> Built-in
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] gap-0.5 font-normal text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                    <Sparkles className="size-2.5" /> Custom
+                  </Badge>
+                )}
+              </DialogTitle>
+              <DialogDescription className="mt-1">{skill.description}</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-hidden">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Loading skill content...</span>
+            </div>
+          ) : (
+            <ScrollArea className="h-full max-h-[50vh]">
+              <div className="space-y-3 pr-4">
+                {/* Frontmatter */}
+                {frontmatter && (
+                  <div>
+                    <button
+                      onClick={() => setExpanded(!expanded)}
+                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full"
+                    >
+                      <FileText className="size-3" />
+                      <span>Metadata (YAML Frontmatter)</span>
+                      {expanded ? <ChevronUp className="size-3 ml-auto" /> : <ChevronDown className="size-3 ml-auto" />}
+                    </button>
+                    <AnimatePresence>
+                      {expanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <pre className="mt-2 p-3 rounded-lg bg-muted/50 text-xs font-mono text-foreground/80 overflow-x-auto whitespace-pre-wrap">
+                            {frontmatter}
+                          </pre>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* Skill content body */}
+                {body && (
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <div
+                      className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap break-words"
+                      dangerouslySetInnerHTML={{
+                        __html: simpleMarkdown(body),
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Tags */}
+                {skill.tags && skill.tags.length > 0 && (
+                  <div className="pt-2 border-t border-border/60">
+                    <span className="text-xs font-medium text-muted-foreground mb-1.5 block">Tags</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {skill.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Minimal markdown → HTML (headers, bold, italic, code, lists) */
+function simpleMarkdown(md: string): string {
+  return md
+    // Escape HTML
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold mt-4 mb-1.5">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-muted text-xs font-mono">$1</code>')
+    // Unordered lists
+    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
+    // Ordered lists
+    .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal text-sm">$1</li>')
+    // Line breaks
+    .replace(/\n/g, '<br />');
+}
+
+// ─── Skill Detail Dialog (Quick Info) ────────────────────────────────────────
 
 function SkillDetailDialog({
   skill,
   open,
   onOpenChange,
+  onViewContent,
   onEdit,
   onDelete,
 }: {
   skill: Skill | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onViewContent: (skill: Skill) => void;
   onEdit: (skill: Skill) => void;
   onDelete: (skill: Skill) => void;
 }) {
@@ -152,17 +324,6 @@ function SkillDetailDialog({
                     <Sparkles className="size-2.5" /> Custom
                   </Badge>
                 )}
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'text-xs',
-                    skill.status === 'active'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400'
-                      : 'border-border text-muted-foreground'
-                  )}
-                >
-                  {skill.status}
-                </Badge>
               </DialogDescription>
             </div>
           </div>
@@ -212,7 +373,10 @@ function SkillDetailDialog({
             </Button>
           )}
           <Button variant="outline" onClick={() => { onOpenChange(false); onEdit(skill); }}>
-            <Pencil className="size-3.5" /> Edit Skill
+            <Pencil className="size-3.5" /> Edit
+          </Button>
+          <Button onClick={() => { onOpenChange(false); onViewContent(skill); }}>
+            <FileText className="size-3.5" /> View SKILL.md
           </Button>
           <Button onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
@@ -347,17 +511,17 @@ function SkillFormDialog({
 
             {/* Content / Instructions */}
             <div className="space-y-2">
-              <Label htmlFor="skill-content">Instructions</Label>
+              <Label htmlFor="skill-content">Instructions (SKILL.md)</Label>
               <Textarea
                 id="skill-content"
-                placeholder="Provide detailed instructions for the agent..."
+                placeholder={`---\nname: my-skill\ndescription: What this skill does\ntags: [tag1, tag2]\n---\n\n# My Skill\n\nInstructions for the agent...`}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                rows={6}
+                rows={8}
                 className="font-mono text-xs"
               />
               <p className="text-[11px] text-muted-foreground">
-                These instructions guide the agent when using this skill.
+                YAML frontmatter is optional. These instructions guide the agent when using this skill.
               </p>
             </div>
           </div>
@@ -385,10 +549,12 @@ function SkillCard({
   skill,
   onView,
   onEdit,
+  onReadContent,
 }: {
   skill: Skill;
   onView: () => void;
   onEdit: () => void;
+  onReadContent: () => void;
 }) {
   const catInfo = getCategoryInfo(skill.category);
   const isEnabled = skill.status === 'active';
@@ -425,6 +591,19 @@ function SkillCard({
           <div className="flex items-center gap-1.5">
             {/* Hover actions */}
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 rounded-md"
+                    onClick={(e) => { e.stopPropagation(); onReadContent(); }}
+                  >
+                    <FileText className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View SKILL.md</TooltipContent>
+              </Tooltip>
               {!skill.isBuiltin && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -451,7 +630,7 @@ function SkillCard({
                     <Eye className="size-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>View</TooltipContent>
+                <TooltipContent>Details</TooltipContent>
               </Tooltip>
             </div>
 
@@ -529,6 +708,7 @@ export function SkillsView() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [apiCategories, setApiCategories] = useState<string[]>([]);
   const [viewingSkill, setViewingSkill] = useState<Skill | null>(null);
+  const [contentSkill, setContentSkill] = useState<Skill | null>(null);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -613,6 +793,9 @@ export function SkillsView() {
     return cats;
   }, [skills, apiCategories]);
 
+  // Split skills into builtin and custom
+  const builtinSkills = skills.filter((s) => s.isBuiltin);
+  const customSkills = skills.filter((s) => !s.isBuiltin);
   const enabledCount = skills.filter((s) => s.status === 'active').length;
 
   const handleSave = async (data: { action: string; name: string; category?: string; description?: string; content?: string }) => {
@@ -671,6 +854,10 @@ export function SkillsView() {
     }
   };
 
+  const handleViewContent = (skill: Skill) => {
+    setContentSkill(skill);
+  };
+
   const handleEditFromView = (skill: Skill) => {
     setEditingSkill(skill);
   };
@@ -685,6 +872,11 @@ export function SkillsView() {
             <p className="text-sm text-muted-foreground mt-0.5">
               {skills.length} skill{skills.length !== 1 ? 's' : ''} &middot;{' '}
               <span className="text-emerald-600 dark:text-emerald-400 font-medium">{enabledCount} active</span>
+              {customSkills.length > 0 && (
+                <> &middot;{' '}
+                <span className="text-amber-600 dark:text-amber-400 font-medium">{customSkills.length} custom</span>
+                </>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -708,7 +900,7 @@ export function SkillsView() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
-              placeholder="Search skills by name or description..."
+              placeholder="Search skills by name, description, or tags..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 h-9 bg-muted/30 border-border/50"
@@ -764,7 +956,7 @@ export function SkillsView() {
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="p-4 sm:p-6">
+            <div className="p-4 sm:p-6 space-y-8">
               {skills.length === 0 ? (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -782,31 +974,84 @@ export function SkillsView() {
                   </p>
                 </motion.div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                  <AnimatePresence mode="popLayout">
-                    {skills.map((skill) => (
-                      <SkillCard
-                        key={skill.name}
-                        skill={skill}
-                        onView={() => setViewingSkill(skill)}
-                        onEdit={() => setEditingSkill(skill)}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
+                <>
+                  {/* Built-in Skills Section */}
+                  {builtinSkills.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Star className="size-4 text-muted-foreground" />
+                        <h2 className="text-sm font-semibold text-foreground">
+                          Built-in Skills
+                        </h2>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {builtinSkills.length}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                        <AnimatePresence mode="popLayout">
+                          {builtinSkills.map((skill) => (
+                            <SkillCard
+                              key={skill.name}
+                              skill={skill}
+                              onView={() => setViewingSkill(skill)}
+                              onEdit={() => setEditingSkill(skill)}
+                              onReadContent={() => handleViewContent(skill)}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Custom Skills Section */}
+                  {customSkills.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="size-4 text-amber-500" />
+                        <h2 className="text-sm font-semibold text-foreground">
+                          Custom Skills
+                        </h2>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {customSkills.length}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                        <AnimatePresence mode="popLayout">
+                          {customSkills.map((skill) => (
+                            <SkillCard
+                              key={skill.name}
+                              skill={skill}
+                              onView={() => setViewingSkill(skill)}
+                              onEdit={() => setEditingSkill(skill)}
+                              onReadContent={() => handleViewContent(skill)}
+                            />
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </ScrollArea>
         )}
       </div>
 
-      {/* View Skill Dialog */}
+      {/* View Skill Dialog (Quick Details) */}
       <SkillDetailDialog
         skill={viewingSkill}
         open={!!viewingSkill}
         onOpenChange={(v) => !v && setViewingSkill(null)}
+        onViewContent={handleViewContent}
         onEdit={handleEditFromView}
         onDelete={handleDelete}
+      />
+
+      {/* View SKILL.md Content Dialog */}
+      <SkillContentDialog
+        skill={contentSkill}
+        open={!!contentSkill}
+        onOpenChange={(v) => !v && setContentSkill(null)}
       />
 
       {/* Edit Skill Dialog */}

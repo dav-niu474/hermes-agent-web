@@ -717,7 +717,7 @@ export async function POST(request: NextRequest) {
                     : "";
                   const toolId = typeof toolData === "object" && toolData && "id" in toolData
                     ? String((toolData as Record<string, unknown>).id)
-                    : `tool-${Date.now()}`;
+                    : `tool-${Date.now()}-${i}`;
                   writeSSE(
                     JSON.stringify({
                       id: completionId,
@@ -741,7 +741,7 @@ export async function POST(request: NextRequest) {
                     : "";
                   const toolId2 = typeof event.data === "object" && event.data && "id" in event.data
                     ? String((event.data as Record<string, unknown>).id)
-                    : "";
+                    : `tool-end-${Date.now()}-${i}`;
                   writeSSE(
                     JSON.stringify({
                       id: completionId,

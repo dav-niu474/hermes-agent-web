@@ -28,6 +28,8 @@ export interface ChatMessage {
   duration?: number;
   createdAt?: Date;
   isStreaming?: boolean;
+  /** Whether reasoning/thinking has completed (even if overall streaming continues for tool calls). */
+  reasoningComplete?: boolean;
 }
 
 interface AppState {
@@ -53,6 +55,10 @@ interface AppState {
   upsertToolCall: (entry: ToolCallEntry) => void;
   /** Mark the latest running tool call as done with a result. */
   completeToolCall: (id: string, result: string) => void;
+  /** Mark reasoning as complete on the last assistant message (content started arriving). */
+  markReasoningComplete: () => void;
+  /** Finalize the last assistant message: set isStreaming=false and optional duration. */
+  finalizeLastAssistantMessage: (duration?: number) => void;
   setIsStreaming: (streaming: boolean) => void;
   setChatSessions: (sessions: { id: string; title: string; model: string }[]) => void;
   clearMessages: () => void;
@@ -149,6 +155,30 @@ export const useAppStore = create<AppState>((set) => ({
             existing[idx] = { ...existing[idx], status: 'done' as const, result, completedAt: Date.now() };
           }
           msgs[i] = { ...msgs[i], toolCallEntries: existing };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+  markReasoningComplete: () =>
+    set((s) => {
+      const msgs = [...s.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          if (msgs[i].reasoning && !msgs[i].reasoningComplete) {
+            msgs[i] = { ...msgs[i], reasoningComplete: true };
+          }
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+  finalizeLastAssistantMessage: (duration) =>
+    set((s) => {
+      const msgs = [...s.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          msgs[i] = { ...msgs[i], isStreaming: false, ...(duration != null ? { duration } : {}) };
           break;
         }
       }

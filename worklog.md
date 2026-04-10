@@ -767,3 +767,119 @@ Stage Summary:
 - Streaming errors shown as animated red banners
 - Files modified: src/store/app-store.ts, src/components/hermes/views/chat-view.tsx, src/app/api/chat/route.ts
 - Zero lint errors in modified files
+
+---
+Task ID: skills-memory-init
+Agent: Main Agent
+Task: Initialize basic skills system and memory management
+
+Work Log:
+- Read worklog and analyzed project structure (7,513 lines of TypeScript in src/lib/hermes/)
+- Verified existing API routes: skills (GET/POST), skills/[name] (GET), memory (GET/PUT), tools (GET), chat (POST)
+- Verified existing lib modules: skills.ts (1,353 lines), memory.ts (711 lines), tool-registry.ts (552 lines), tools-registry.ts (1,239 lines)
+
+Created src/lib/hermes/default-skills.ts (~320 lines):
+- Defined DefaultSkill interface with name, category, description, version, tags, content
+- Created 11 default skills with full SKILL.md content:
+  1. web-search - Web search and information retrieval
+  2. code-execution - Execute Python code in sandbox
+  3. file-operations - Read/write/search files
+  4. memory - Agent memory management
+  5. skill-manager - Create/edit/delete skills (self-evolution)
+  6. todo - Task management
+  7. terminal - Command execution
+  8. image-generation - Generate images from text
+  9. tts - Text-to-speech
+  10. web-browser - Browse web pages
+  11. clipboard - Clipboard operations
+- Exported helpers: getDefaultSkill, getDefaultSkillNames, getDefaultSkillsByCategory, getDefaultSkillCategories
+
+Fixed src/app/api/memory/route.ts:
+- Added POST handler with action-based CRUD operations
+- action="read" returns memory entries from both MEMORY.md and USER.md
+- action="add" adds entry to target (memory|user) with injection scanning
+- action="replace" finds substring match and replaces content
+- action="remove" finds substring match and removes entry
+- Kept existing GET (read) and PUT (bulk replace) for backward compatibility
+- All operations use the embedded MemoryManager class
+
+Created src/lib/hermes/registered-tools.ts (~340 lines):
+- Registered 16 tools into the dynamic ToolRegistry singleton:
+  - web_search (with z-ai-web-dev-sdk handler)
+  - execute_code (placeholder - requires CLI environment)
+  - read_file, write_file (placeholders - require CLI environment)
+  - memory (full add/replace/remove/read implementation using MemoryManager)
+  - skills_list, skill_view, skill_manage (using embedded skills.ts)
+  - todo (session-scoped task management)
+  - image_generate (with z-ai-web-dev-sdk handler)
+  - browser_navigate, browser_screenshot (placeholders - require browser)
+  - text_to_speech (placeholder - requires TTS engine)
+  - web_extract (with z-ai-web-dev-sdk handler)
+  - terminal (placeholder - requires CLI environment)
+  - vision_analyze (with z-ai-web-dev-sdk handler)
+- Web-compatible tools have actual handlers; non-web tools return placeholders
+- Exported REGISTERED_TOOL_COUNT constant
+
+Updated src/lib/hermes/index.ts:
+- Added exports for DEFAULT_SKILLS and default-skills helper functions
+- Added import of registered-tools.ts for side-effect tool registration
+
+Enhanced src/components/hermes/views/skills-view.tsx (~830 lines):
+- Added SkillContentDialog: fetches and renders full SKILL.md content from /api/skills/[name]
+  - Parses YAML frontmatter separately from body
+  - Simple markdown rendering (headers, bold, italic, code, lists)
+  - Collapsible frontmatter section
+  - Tags display
+- Added "View SKILL.md" button on skill cards (FileText icon)
+- Split skill grid into Built-in and Custom sections with section headers
+- Header now shows custom skill count
+- Detail dialog now has "View SKILL.md" button alongside Edit
+- Search placeholder updated to mention tags
+
+Verified existing functionality:
+- Skills API: GET /api/skills uses scanSkills() from embedded skills.ts, POST uses manageSkill()
+- Skills detail: GET /api/skills/[name] uses getSkillContent() from embedded skills.ts
+- Navigation: Skills is already wired in sidebar.tsx and view-router.tsx
+- MemoryManager: Full CRUD (add/replace/remove/read) with prompt injection scanning
+
+Stage Summary:
+- Files created: src/lib/hermes/default-skills.ts, src/lib/hermes/registered-tools.ts
+- Files modified: src/app/api/memory/route.ts, src/lib/hermes/index.ts, src/components/hermes/views/skills-view.tsx
+- 11 default skills with complete SKILL.md content
+- Memory API now supports POST with action-based CRUD
+- 16 tools registered in dynamic ToolRegistry
+- Skills view enhanced with SKILL.md content viewer and built-in/custom sections
+- ESLint: zero new errors (5 pre-existing errors in hermes-agent/ directory only)
+
+---
+
+## Task 4: UX Optimization, Skills Init, Memory Integration, Model Selector Fix
+
+**Status**: ✅ Completed
+**Date**: 2025-07-10
+
+### Work Log:
+- Fixed tool call ID mismatch: Added `tc.id` to all `tool_start`/`tool_end` events in agent-loop.ts (both sequential and parallel execution paths)
+- Fixed route.ts fallback tool IDs to include index suffix for uniqueness
+- Fixed AbortController: Created `new AbortController()` in handleSend, stored in abortRef, passed signal to fetch
+- Added `reasoningComplete` flag to ChatMessage store for separate reasoning state tracking
+- Added `markReasoningComplete()` and `finalizeLastAssistantMessage()` store actions
+- Fixed streaming cursor: Now uses AnimatePresence for smooth fade-out on completion
+- Fixed ThinkingBlock spinner: Stops when first content delta arrives (not dependent on overall streaming)
+- Enhanced ToolCallBlock: Running=amber+pulsing dots, Done=emerald+checkmark, Error=red+alert
+- Added "Processing results..." indicator between tool completion and next content
+- Added error banner with dismiss button (auto-dismiss after 10s, silent abort errors)
+- Replaced ScrollArea with native scroll for model selector (overscroll-contain)
+- Created `src/lib/hermes/default-skills.ts` with 11 default skills
+- Created `src/lib/hermes/registered-tools.ts` with 16 registered tools
+- Enhanced Skills UI with skill content dialog and built-in/custom sections
+- Fixed Memory API POST handler with full CRUD (add/replace/remove/read)
+- Removed unused ScrollArea import from chat-view
+
+### Stage Summary:
+- Tool calls now properly show as "done" (was stuck on "running" forever)
+- Streaming cursor fades out smoothly instead of blinking after completion
+- Model selector scrolls properly with native overflow-y-auto
+- 11 default skills initialized covering core hermes-agent capabilities
+- 16 tools registered in dynamic tool registry
+- Memory management API supports full CRUD operations

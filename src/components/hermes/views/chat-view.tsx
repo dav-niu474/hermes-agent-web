@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow, format } from 'date-fns';
 import {
@@ -32,12 +32,12 @@ import {
   CheckCircle2,
   Terminal,
   X,
+  Zap,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -106,10 +106,11 @@ interface SessionItem {
    THINKING BLOCK (collapsible reasoning display)
    ═════════════════════════════════════════════════════ */
 
-function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
+function ThinkingBlock({ reasoning, isStreaming, reasoningComplete }: { reasoning: string; isStreaming?: boolean; reasoningComplete?: boolean }) {
   const [open, setOpen] = useState(false);
   if (!reasoning) return null;
-  const isDone = !isStreaming;
+  // Reasoning is done either when explicitly marked complete or when overall streaming ends
+  const isDone = reasoningComplete === true || !isStreaming;
   const lines = reasoning.split('\n').filter((l) => l.trim());
   const preview = lines.slice(0, 2).join(' ').slice(0, 120);
   const fullLines = lines.length;
@@ -128,11 +129,12 @@ function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStream
           'hover:bg-violet-100/80 dark:hover:bg-violet-500/10',
         )}
       >
-        <Brain className="size-3.5 shrink-0 text-violet-500 dark:text-violet-400" />
+        <Brain className={cn('size-3.5 shrink-0', isDone ? 'text-violet-400 dark:text-violet-500' : 'text-violet-500 dark:text-violet-400')} />
         <span className="font-medium text-violet-700 dark:text-violet-300">
           {isDone ? 'Thought for a moment' : 'Thinking...'}
         </span>
         {!isDone && <Loader2 className="size-3 animate-spin text-violet-400" />}
+        {isDone && <Check className="size-3 text-violet-400 dark:text-violet-500" />}
         {isDone && fullLines > 2 && (
           <span className="text-violet-500/60 dark:text-violet-400/50">({fullLines} lines)</span>
         )}
@@ -160,8 +162,8 @@ function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStream
         )}
       </AnimatePresence>
 
-      {/* Inline preview when collapsed and streaming */}
-      {!open && isStreaming && preview && (
+      {/* Inline preview when collapsed and still reasoning */}
+      {!open && !isDone && preview && (
         <p className="text-[11px] text-violet-500/60 dark:text-violet-400/50 px-3 mt-1 truncate font-mono">
           {preview}
         </p>
@@ -183,6 +185,16 @@ function ToolCallBlock({ entry }: { entry: ToolCallEntry }) {
     ? ((entry.completedAt - entry.startedAt) / 1000).toFixed(1)
     : null;
 
+  const formattedArgs = useMemo(() => {
+    if (!entry.args) return null;
+    try { return JSON.stringify(JSON.parse(entry.args), null, 2); } catch { return entry.args; }
+  }, [entry.args]);
+
+  const formattedResult = useMemo(() => {
+    if (!entry.result) return null;
+    try { return JSON.stringify(JSON.parse(entry.result), null, 2); } catch { return entry.result; }
+  }, [entry.result]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -193,30 +205,53 @@ function ToolCallBlock({ entry }: { entry: ToolCallEntry }) {
         onClick={() => setOpen(!open)}
         className={cn(
           'group/t flex items-center gap-2 w-full text-left px-3 py-2 rounded-xl text-xs transition-colors',
-          isRunning && 'bg-amber-50/80 dark:bg-amber-500/5 border border-amber-200/50 dark:border-amber-500/15',
+          isRunning && 'bg-amber-50/80 dark:bg-amber-500/5 border border-amber-200/50 dark:border-amber-500/15 tool-card-running',
           isDone && 'bg-emerald-50/80 dark:bg-emerald-500/5 border border-emerald-200/50 dark:border-emerald-500/15',
           isError && 'bg-red-50/80 dark:bg-red-500/5 border border-red-200/50 dark:border-red-500/15',
+          !isRunning && !isDone && !isError && 'bg-muted/50 border border-border/40',
         )}
       >
-        <Wrench className={cn(
-          'size-3.5 shrink-0',
-          isRunning && 'text-amber-500 dark:text-amber-400',
-          isDone && 'text-emerald-500 dark:text-emerald-400',
-          isError && 'text-red-500 dark:text-red-400',
-        )} />
+        {/* Icon based on state */}
+        {isRunning && (
+          <div className="tool-running-dots shrink-0">
+            <span className="bg-amber-500 dark:bg-amber-400" />
+            <span className="bg-amber-500 dark:bg-amber-400" />
+            <span className="bg-amber-500 dark:bg-amber-400" />
+          </div>
+        )}
+        {isDone && <CheckCircle2 className="size-3.5 shrink-0 text-emerald-500 dark:text-emerald-400" />}
+        {isError && <AlertCircle className="size-3.5 shrink-0 text-red-500 dark:text-red-400" />}
+
+        {/* Tool name prominently */}
         <span className={cn(
-          'font-mono font-medium truncate',
+          'font-mono font-semibold truncate',
           isRunning && 'text-amber-700 dark:text-amber-300',
           isDone && 'text-emerald-700 dark:text-emerald-300',
           isError && 'text-red-700 dark:text-red-300',
         )}>
           {entry.name}
         </span>
-        {isRunning && <Loader2 className="size-3 animate-spin text-amber-400" />}
-        {isDone && <CheckCircle2 className="size-3 text-emerald-500" />}
-        {isError && <AlertCircle className="size-3 text-red-500" />}
+
+        {/* Status badge */}
+        {isRunning && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 font-normal border-amber-300/50 text-amber-600 dark:border-amber-500/30 dark:text-amber-400">
+            running
+          </Badge>
+        )}
+        {isDone && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 font-normal border-emerald-300/50 text-emerald-600 dark:border-emerald-500/30 dark:text-emerald-400">
+            done
+          </Badge>
+        )}
+        {isError && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 font-normal border-red-300/50 text-red-600 dark:border-red-500/30 dark:text-red-400">
+            error
+          </Badge>
+        )}
+
+        {/* Duration */}
         {duration && (
-          <span className="text-[10px] text-muted-foreground/60 ml-auto shrink-0">{duration}s</span>
+          <span className="text-[10px] text-muted-foreground/60 ml-auto shrink-0 tabular-nums">{duration}s</span>
         )}
         <ChevronDown className={cn(
           'size-3 text-muted-foreground/50 transition-transform shrink-0',
@@ -233,27 +268,35 @@ function ToolCallBlock({ entry }: { entry: ToolCallEntry }) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-3 py-2.5 mt-1 rounded-xl bg-muted/50 border border-border/40 space-y-2">
-              {entry.args && (
+            <div className="px-3 py-2.5 mt-1 rounded-xl bg-muted/50 border border-border/40 space-y-2.5">
+              {formattedArgs && (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Arguments</p>
-                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/50 rounded-lg p-2 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
-                    {(() => { try { return JSON.stringify(JSON.parse(entry.args), null, 2); } catch { return entry.args; } })()}
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                    <Terminal className="size-2.5" /> Arguments
+                  </p>
+                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/80 rounded-lg p-2.5 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-words border border-border/30">
+                    {formattedArgs}
                   </pre>
                 </div>
               )}
-              {entry.result && (
+              {formattedResult && (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Result</p>
-                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/50 rounded-lg p-2 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
-                    {(() => { try { return JSON.stringify(JSON.parse(entry.result), null, 2); } catch { return entry.result; } })()}
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                    <Code className="size-2.5" /> Result
+                  </p>
+                  <pre className="text-[11px] font-mono text-foreground/80 bg-background/80 rounded-lg p-2.5 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-words border border-border/30">
+                    {formattedResult}
                   </pre>
                 </div>
               )}
               {isRunning && !entry.result && (
-                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                  <Terminal className="size-3" />
-                  <span className="text-[11px]">Executing...</span>
+                <div className="flex items-center gap-2 py-1 text-amber-600 dark:text-amber-400">
+                  <span className="tool-running-dots">
+                    <span className="bg-amber-500 dark:bg-amber-400" />
+                    <span className="bg-amber-500 dark:bg-amber-400" />
+                    <span className="bg-amber-500 dark:bg-amber-400" />
+                  </span>
+                  <span className="text-[11px] font-medium">Executing...</span>
                 </div>
               )}
             </div>
@@ -273,6 +316,22 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const isSystem = message.role === 'system';
   const isTool = message.role === 'tool';
   const [copied, setCopied] = useState(false);
+
+  // All hooks must be called before any early returns
+  const timeStr = message.createdAt
+    ? format(new Date(message.createdAt), 'HH:mm')
+    : null;
+  const hasReasoning = !!message.reasoning;
+  const hasToolCalls = (message.toolCallEntries?.length ?? 0) > 0;
+
+  // Check if all tool calls are completed (done or error)
+  const allToolCallsDone = useMemo(() => {
+    if (!message.toolCallEntries?.length) return false;
+    return message.toolCallEntries.every((tc) => tc.status === 'done' || tc.status === 'error');
+  }, [message.toolCallEntries]);
+
+  // Show "Processing results" when: streaming, has tool calls all done, no content yet
+  const showProcessingResults = !isUser && message.isStreaming && hasToolCalls && allToolCallsDone && !message.content;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -305,13 +364,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     );
   }
 
-  const timeStr = message.createdAt
-    ? format(new Date(message.createdAt), 'HH:mm')
-    : null;
-
-  const hasReasoning = !!message.reasoning;
-  const hasToolCalls = (message.toolCallEntries?.length ?? 0) > 0;
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -327,7 +379,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       <div className={cn('max-w-[85%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
         {/* Thinking / Reasoning Block */}
         {!isUser && hasReasoning && (
-          <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} />
+          <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} reasoningComplete={message.reasoningComplete} />
         )}
 
         {/* Tool Call Blocks */}
@@ -368,15 +420,35 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 <ReactMarkdown>{message.content || ' '}</ReactMarkdown>
               </div>
             )}
-            {message.isStreaming && message.content && <span className="streaming-cursor" />}
+            {/* Streaming cursor with smooth fade-out on completion */}
+            {!isUser && (
+              <AnimatePresence>
+                {message.isStreaming && message.content && (
+                  <motion.span
+                    key="streaming-cursor"
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                    className="streaming-cursor"
+                  />
+                )}
+              </AnimatePresence>
+            )}
           </div>
         )}
 
-        {/* Streaming indicator when no content yet but thinking/tools are happening */}
-        {!isUser && !message.content && message.isStreaming && (hasReasoning || hasToolCalls) && (
+        {/* "Processing results..." indicator after tool calls complete, before content arrives */}
+        {showProcessingResults && (
+          <div className="flex items-center gap-2 px-1 py-1">
+            <Zap className="size-3 text-primary/60 animate-pulse" />
+            <span className="text-[11px] text-muted-foreground/60 font-medium">Processing results...</span>
+          </div>
+        )}
+
+        {/* Streaming indicator when no content yet but only reasoning is happening */}
+        {!isUser && !message.content && message.isStreaming && hasReasoning && !hasToolCalls && !message.reasoningComplete && (
           <div className="flex items-center gap-1.5 px-1 py-0.5">
-            <Loader2 className="size-3 animate-spin text-primary/50" />
-            <span className="text-[10px] text-muted-foreground/50">Generating response...</span>
+            <Loader2 className="size-3 animate-spin text-violet-400/50" />
+            <span className="text-[10px] text-muted-foreground/50">Thinking...</span>
           </div>
         )}
 
@@ -647,7 +719,7 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
           <ChevronDown className="size-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0 overflow-hidden" align="start">
+      <PopoverContent className="w-80 p-0" align="start" sideOffset={8}>
         <div className="p-2 border-b border-border/60">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -656,10 +728,11 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 h-8 text-xs"
+              autoFocus
             />
           </div>
         </div>
-        <ScrollArea className="max-h-96">
+        <div className="max-h-[420px] overflow-y-auto overscroll-contain">
           <div className="p-1">
             {filteredGroups.map((group) => (
               <div key={group.provider}>
@@ -712,7 +785,7 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
               <p className="text-xs text-muted-foreground text-center py-4">No models found</p>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -778,6 +851,8 @@ export function ChatView() {
     appendReasoning,
     upsertToolCall,
     completeToolCall,
+    markReasoningComplete,
+    finalizeLastAssistantMessage,
     isStreaming,
     setIsStreaming,
     currentSessionId,
@@ -964,13 +1039,18 @@ export function ChatView() {
     addChatMessage({ id: `msg-${Date.now()}-resp`, role: 'assistant', content: '', isStreaming: true, createdAt: new Date() });
     setIsStreaming(true);
 
+    const abortCtrl = new AbortController();
+    abortRef.current = abortCtrl;
+
     const effectiveModel = selectedModel && selectedModel !== 'hermes-agent' ? selectedModel : DEFAULT_MODEL;
     const effectiveProvider = getModelProvider(effectiveModel);
+    const streamStartTime = Date.now();
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           messages: [...chatMessages, { role: 'user', content: trimmed || '(Image)', image_url: attachedImage || undefined }].map((m) => ({
             role: m.role,
@@ -1000,6 +1080,7 @@ export function ChatView() {
 
       const decoder = new TextDecoder();
       let fullContent = '';
+      let hasMarkedReasoningComplete = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1061,6 +1142,11 @@ export function ChatView() {
               default: {
                 // Regular content delta
                 if (delta?.content) {
+                  // Mark reasoning as complete when first content arrives
+                  if (!hasMarkedReasoningComplete) {
+                    hasMarkedReasoningComplete = true;
+                    markReasoningComplete();
+                  }
                   fullContent += delta.content;
                   updateLastAssistantMessage(fullContent);
                 }
@@ -1073,18 +1159,28 @@ export function ChatView() {
         }
       }
 
-      updateLastAssistantMessage(fullContent || 'No response received.');
+      const elapsed = Date.now() - streamStartTime;
+      finalizeLastAssistantMessage(elapsed);
     } catch (error) {
+      // Don't show error if it was an intentional abort
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        finalizeLastAssistantMessage(Date.now() - streamStartTime);
+        return;
+      }
       console.error('Chat error:', error);
+      setStreamError(error instanceof Error ? error.message : 'An unexpected error occurred');
       updateLastAssistantMessage(
         `**Error**\n\n${error instanceof Error ? error.message : 'Unknown error'}`
       );
+      const elapsed = Date.now() - streamStartTime;
+      finalizeLastAssistantMessage(elapsed);
     } finally {
       setIsStreaming(false);
+      abortRef.current = null;
       // Clear stream error after a short delay so user can see it
-      setTimeout(() => setStreamError(null), 8000);
+      setTimeout(() => setStreamError(null), 10000);
     }
-  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, imagePreview, addChatMessage, updateLastAssistantMessage, appendReasoning, upsertToolCall, completeToolCall, setIsStreaming, setCurrentSessionId, fetchSessions]);
+  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, imagePreview, addChatMessage, updateLastAssistantMessage, appendReasoning, upsertToolCall, completeToolCall, markReasoningComplete, finalizeLastAssistantMessage, setIsStreaming, setCurrentSessionId, fetchSessions]);
 
   const handleStop = () => {
     abortRef.current?.abort();
@@ -1296,9 +1392,17 @@ export function ChatView() {
                   exit={{ opacity: 0, y: -4 }}
                   className="mb-2"
                 >
-                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-50/80 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/20">
-                    <AlertCircle className="size-3.5 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
-                    <p className="text-xs text-red-700 dark:text-red-300 leading-relaxed">{streamError}</p>
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-50/90 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/20">
+                    <AlertCircle className="size-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700 dark:text-red-300 leading-relaxed flex-1">{streamError}</p>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-5 shrink-0 text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-500/20"
+                      onClick={() => setStreamError(null)}
+                    >
+                      <X className="size-3" />
+                    </Button>
                   </div>
                 </motion.div>
               )}

@@ -138,3 +138,18 @@ export type {
   ToolsetDefinition as StaticToolsetDefinition,
   CategoryMeta,
 } from "./tools-registry";
+
+// Default skills — core hermes-agent capabilities
+export {
+  DEFAULT_SKILLS,
+  getDefaultSkill,
+  getDefaultSkillNames,
+  getDefaultSkillsByCategory,
+  getDefaultSkillCategories,
+} from "./default-skills";
+export type { DefaultSkill } from "./default-skills";
+
+// Registered tools — populates dynamic registry (import for side effects)
+export { REGISTERED_TOOL_COUNT } from "./registered-tools";
+// Ensure tools are registered when this module is imported
+import "./registered-tools";
