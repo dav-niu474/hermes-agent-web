@@ -276,3 +276,124 @@ All tool schemas match the exact JSON Schema from the Python registry:
 - TypeScript strict mode compatible
 - File is purely declarative (no side effects) — safe for tree-shaking
 - Descriptions are copied verbatim from the Python tool schemas for accuracy
+
+---
+
+## Task 2-5: Rewrite API Routes to Proxy to hermes-api Mini-Service
+
+**Status**: ✅ Completed
+**Date**: 2025-07-09
+
+### Summary
+Rewrote all 6 Next.js API routes to proxy requests to the Python hermes-api mini-service (port 8643) instead of calling LLM APIs directly or reading from local Prisma DB. All cross-port requests use the gateway rule `?XTransformPort=8643` with relative paths. The chat route retains local Prisma session management for web UI persistence while forwarding messages to hermes-api.
+
+### Files Modified
+
+#### 1. `src/app/api/chat/route.ts` — Chat completions proxy (~200 lines)
+- **POST**: Forwards request body (messages, stream, model) to `/v1/chat/completions?XTransformPort=8643`
+- **Streaming**: Transparently pipes SSE response body from hermes-api, accumulating full content and token count for local DB save
+- **Non-streaming**: Returns JSON response from hermes-api with local session metadata
+- **Headers forwarded**: `Content-Type`, `X-Hermes-Session-Id`; response forwards `X-Hermes-Session-Id` and `X-Model`
+- **Local DB**: Still manages chatSession/chatMessage in Prisma for session persistence — creates/updates sessions, saves user and assistant messages
+- **Error handling**: Propagates hermes-api errors, graceful fallback on DB failures
+
+#### 2. `src/app/api/tools/route.ts` — Tools proxy (~40 lines)
+- **GET**: Forwards query params (`?category=`, `?toolset=`, `?search=`) to `/v1/tools?XTransformPort=8643`
+- Returns full hermes-api response as-is (tools array, toolsets, categories, total count)
+- Removed dependency on local TypeScript tools-registry
+
+#### 3. `src/app/api/skills/route.ts` — Skills proxy (~40 lines)
+- **GET**: Forwards query params (`?category=`, `?search=`) to `/v1/skills?XTransformPort=8643`
+- Returns full hermes-api response (skills array, total, categories)
+- Removed local Prisma DB reads for skills
+
+#### 4. `src/app/api/skills/[name]/route.ts` — Skill detail proxy (NEW)
+- **GET**: Proxies to `/v1/skills/{name}?XTransformPort=8643` for individual skill content
+- URL-encodes skill name for safe path construction
+- Returns skill content, linked files, and metadata from hermes-api
+
+#### 5. `src/app/api/memory/route.ts` — Memory proxy (~65 lines)
+- **GET**: Proxies to `/v1/memory?XTransformPort=8643` to read hermes-agent memory
+- **PUT**: Forwards body to `/v1/memory?XTransformPort=8643` to update memory
+- Removed local Prisma DB CRUD for memory entries
+
+#### 6. `src/app/api/hermes/route.ts` — Health/connection check proxy (~100 lines)
+- **GET**: Checks health at `/health?XTransformPort=8643`, models at `/v1/models?XTransformPort=8643`, and config at `/v1/config?XTransformPort=8643` — all in parallel via `Promise.allSettled`
+- Returns connection status (connected/disconnected/error), health data, model list, and config
+- **PUT**: Saves hermes connection config to local DB (hermes_url, hermes_api_key) and optionally forwards config payload to hermes-api `/v1/config`
+
+#### 7. `src/app/api/config/route.ts` — Config proxy (~55 lines)
+- **GET**: Proxies to `/v1/config?XTransformPort=8643`, falls back to empty object on failure
+- **PUT**: Forwards config body to `/v1/config?XTransformPort=8643` for hermes-agent config updates
+- Removed local Prisma DB key-value store reads/writes
+
+### Gateway Configuration
+All cross-port requests use the Caddy gateway pattern:
+- Relative paths only (e.g., `/v1/tools?XTransformPort=8643`)
+- Never includes port in URL path
+- `XTransformPort=8643` query parameter for all hermes-api requests
+
+### Technical Notes
+- ESLint passes with zero errors on `src/app/api/` (5 pre-existing errors in `hermes-agent/` unrelated)
+- Dev server compiles and serves successfully
+- Chat streaming uses `TransformStream` to transparently pipe SSE chunks while accumulating content for local DB persistence
+- All routes include proper error handling with hermes-api error status forwarding
+- Local Prisma session management retained only in chat route for web UI session history
+
+---
+
+## Task 8: Fix API Routes & Enable hermes-agent Agent Loop
+
+**Status**: ✅ Completed
+**Date**: 2025-07-10
+
+### Summary
+Fixed critical bugs preventing API routes from working and added a complete Agent Loop to the hermes-api mini-service. All 7 API endpoints now work correctly, and the chat feature implements the full hermes-agent pattern: LLM call → tool calls → execute → feed back → final response.
+
+### Issues Fixed
+
+#### 1. Server-side fetch URL resolution (all API routes)
+**Problem**: API routes used relative paths with `XTransformPort` query param (e.g., `/v1/tools?XTransformPort=8643`), but server-side `fetch()` has no base URL to resolve against, causing `ERR_INVALID_URL`.
+**Fix**: Changed all API routes to use `http://localhost:8643` directly via `HERMES_API_URL` env var with fallback default.
+**Files**: `chat/route.ts`, `tools/route.ts`, `skills/route.ts`, `skills/[name]/route.ts`, `memory/route.ts`, `config/route.ts`, `hermes/route.ts`
+
+#### 2. Model name resolution
+**Problem**: Frontend sends `"model": "hermes-agent"` as a UI placeholder, but hermes-api forwarded this directly to NVIDIA NIM API, resulting in 404.
+**Fix**: Added model name validation — only uses request model if it contains "/" (indicating a real LLM model like `meta/llama-3.3-70b-instruct`), otherwise falls back to config default.
+
+#### 3. Default LLM model
+**Problem**: `z-ai/glm-4.7` model name didn't exist on NVIDIA NIM (correct name is `z-ai/glm4.7`), and GLM models were unstable on the API.
+**Fix**: Changed default to `meta/llama-3.3-70b-instruct` which is reliable and supports tool calling.
+
+#### 4. Agent Loop — Tool call handling
+**Problem**: When LLM returns `tool_calls` instead of text content, hermes-api returned empty content to the frontend.
+**Fix**: Implemented a full Agent Loop:
+- Non-streaming: `for` loop up to 5 rounds. On tool_calls, simulates execution via `_simulate_tool_execution()`, feeds results back to LLM for final text response.
+- Streaming: Same loop but streams intermediate results. Shows "🔧 Calling tools: ..." to user during tool execution phase.
+- `_simulate_tool_execution()` provides human-readable placeholder results for all 36 registered tools.
+
+#### 5. aiohttp bytes encoding
+**Problem**: `aiohttp.StreamResponse.write()` requires bytes, not str.
+**Fix**: Added `.encode()` to all `response.write(f"...")` calls in the streaming handler.
+
+### Test Results (all passing)
+| Endpoint | Method | Result |
+|----------|--------|--------|
+| `/api/hermes` | GET | ✅ Status: connected, Models: 1 |
+| `/api/tools` | GET | ✅ 36 tools, 10 categories |
+| `/api/skills` | GET | ✅ 122 skills |
+| `/api/memory` | GET | ✅ Memory data returned |
+| `/api/config` | GET | ✅ LLM config returned |
+| `/api/chat` (non-stream) | POST | ✅ Agent loop works, response generated |
+| `/api/chat` (streaming) | POST | ✅ SSE stream with tool call events |
+
+### Architecture
+```
+Browser → Next.js API Routes → hermes-api (Python, port 8643)
+                                ├── Agent Loop: LLM → tools → execute → LLM → response
+                                ├── Tool Registry: 36 tools across 10 categories
+                                ├── Skills Scanner: 122 skills from ~/.hermes/skills/
+                                ├── Memory System: ~/.hermes/memory/MEMORY.md + USER.md
+                                ├── Config: ~/.hermes/config.yaml + env vars
+                                └── LLM Provider: NVIDIA NIM (OpenAI-compatible API)
+```

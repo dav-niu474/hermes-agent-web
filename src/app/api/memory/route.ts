@@ -1,137 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+
 /**
  * GET /api/memory
- * List all memory entries. Returns empty array when database is not configured.
+ * Fetch memory content from hermes-api.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const category = searchParams.get("category");
-    const search = searchParams.get("search");
+    const hermesResponse = await fetch(`${HERMES_API}/v1/memory`);
 
-    const where: Record<string, unknown> = {};
-    if (category && category !== "all") where.category = category;
-    if (search) {
-      where.OR = [
-        { content: { contains: search } },
-        { tags: { contains: search } },
-      ];
+    if (!hermesResponse.ok) {
+      const errorText = await hermesResponse.text().catch(() => "Unknown error");
+      console.error("[Memory API] hermes-api error:", hermesResponse.status, errorText);
+      return NextResponse.json(
+        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
+        { status: hermesResponse.status },
+      );
     }
 
-    const { db } = await import("@/lib/db");
-    const memories = await db.memoryEntry.findMany({
-      where: Object.keys(where).length > 0 ? where : undefined,
-      orderBy: { createdAt: "desc" },
-    });
-
+    const data = await hermesResponse.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("[Memory API] Error:", error);
     return NextResponse.json(
-      memories.map((m) => ({
-        id: m.id,
-        category: m.category,
-        content: m.content,
-        tags: m.tags ? m.tags.split(",").map((t) => t.trim()) : [],
-        source: m.source,
-        createdAt: m.createdAt,
-      })),
+      { error: "Failed to fetch memory from hermes-api" },
+      { status: 500 },
     );
-  } catch (error) {
-    console.error("[Memory API] GET error:", error);
-    return NextResponse.json([]);
-  }
-}
-
-/**
- * POST /api/memory
- * Create a new memory entry.
- */
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { category, content, tags, source } = body;
-
-    if (!content?.trim()) {
-      return NextResponse.json({ error: "Content is required" }, { status: 400 });
-    }
-
-    const { db } = await import("@/lib/db");
-    const memory = await db.memoryEntry.create({
-      data: {
-        category: category || "general",
-        content: content.trim(),
-        tags: Array.isArray(tags) ? tags.join(",") : tags || "",
-        source: source || "Web UI",
-      },
-    });
-
-    return NextResponse.json({
-      id: memory.id,
-      category: memory.category,
-      content: memory.content,
-      tags: memory.tags ? memory.tags.split(",") : [],
-      source: memory.source,
-      createdAt: memory.createdAt,
-    });
-  } catch (error) {
-    console.error("[Memory API] POST error:", error);
-    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
   }
 }
 
 /**
  * PUT /api/memory
- * Update a memory entry by id.
+ * Update memory content via hermes-api.
  */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, category, content, tags, source } = body;
 
-    if (!id) {
-      return NextResponse.json({ error: "ID is required" }, { status: 400 });
-    }
-
-    const data: Record<string, unknown> = {};
-    if (category !== undefined) data.category = category;
-    if (content !== undefined) data.content = content;
-    if (tags !== undefined) data.tags = Array.isArray(tags) ? tags.join(",") : tags;
-    if (source !== undefined) data.source = source;
-
-    const { db } = await import("@/lib/db");
-    const memory = await db.memoryEntry.update({
-      where: { id },
-      data,
+    const hermesResponse = await fetch(`${HERMES_API}/v1/memory`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
 
-    return NextResponse.json({
-      id: memory.id,
-      category: memory.category,
-      content: memory.content,
-      tags: memory.tags ? memory.tags.split(",").map((t) => t.trim()) : [],
-      source: memory.source,
-      createdAt: memory.createdAt,
-    });
-  } catch (error) {
-    console.error("[Memory API] PUT error:", error);
-    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
-  }
-}
-
-/**
- * DELETE /api/memory
- * Delete a memory entry by id.
- */
-export async function DELETE(request: NextRequest) {
-  try {
-    const body = await request.json();
-    if (!body.id) {
-      return NextResponse.json({ error: "ID is required" }, { status: 400 });
+    if (!hermesResponse.ok) {
+      const errorText = await hermesResponse.text().catch(() => "Unknown error");
+      console.error("[Memory API] hermes-api error:", hermesResponse.status, errorText);
+      return NextResponse.json(
+        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
+        { status: hermesResponse.status },
+      );
     }
-    const { db } = await import("@/lib/db");
-    await db.memoryEntry.delete({ where: { id: body.id } });
-    return NextResponse.json({ success: true });
+
+    const data = await hermesResponse.json();
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("[Memory API] DELETE error:", error);
-    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+    console.error("[Memory API] Error:", error);
+    return NextResponse.json(
+      { error: "Failed to update memory via hermes-api" },
+      { status: 500 },
+    );
   }
 }

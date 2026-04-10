@@ -1,47 +1,42 @@
 import { NextResponse } from "next/server";
-import {
-  ALL_TOOLS,
-  ALL_TOOLSETS,
-  CATEGORIES,
-  getToolsByCategory,
-  getToolsByToolset,
-} from "@/lib/hermes/tools-registry";
+
+const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
 
 /**
  * GET /api/tools
- * Return tools from the registry with optional ?category=, ?toolset=, and ?search= filters.
- * Also returns toolsets and categories metadata.
+ * Fetch tools from hermes-api with optional ?category=, ?toolset=, ?search= filters.
  */
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const category = searchParams.get("category");
-  const toolset = searchParams.get("toolset");
-  const search = searchParams.get("search");
+  try {
+    const { searchParams } = new URL(request.url);
+    const category = searchParams.get("category");
+    const toolset = searchParams.get("toolset");
+    const search = searchParams.get("search");
 
-  let tools = ALL_TOOLS;
+    // Build query string for hermes-api
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (toolset) params.set("toolset", toolset);
+    if (search) params.set("search", search);
 
-  if (category) {
-    tools = getToolsByCategory(category);
-  }
+    const hermesResponse = await fetch(`${HERMES_API}/v1/tools?${params.toString()}`);
 
-  if (toolset) {
-    tools = getToolsByToolset(toolset);
-  }
+    if (!hermesResponse.ok) {
+      const errorText = await hermesResponse.text().catch(() => "Unknown error");
+      console.error("[Tools API] hermes-api error:", hermesResponse.status, errorText);
+      return NextResponse.json(
+        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
+        { status: hermesResponse.status },
+      );
+    }
 
-  if (search) {
-    const query = search.toLowerCase();
-    tools = tools.filter(
-      (t) =>
-        t.name.toLowerCase().includes(query) ||
-        t.description.toLowerCase().includes(query) ||
-        t.category.toLowerCase().includes(query),
+    const data = await hermesResponse.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("[Tools API] Error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch tools from hermes-api" },
+      { status: 500 },
     );
   }
-
-  return NextResponse.json({
-    tools,
-    toolsets: ALL_TOOLSETS,
-    categories: CATEGORIES,
-    total: tools.length,
-  });
 }

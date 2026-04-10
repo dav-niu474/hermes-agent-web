@@ -1,44 +1,24 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Get hermes-agent connection config from DB (with env fallback)
-async function getHermesConfig() {
-  try {
-    const configs = await db.agentConfig.findMany();
-    const map: Record<string, string> = {};
-    for (const c of configs) map[c.key] = c.value;
-    return {
-      url: map.hermes_url || process.env.HERMES_URL || "http://localhost:8642",
-      apiKey: map.hermes_api_key || process.env.HERMES_API_KEY || "",
-    };
-  } catch {
-    return {
-      url: process.env.HERMES_URL || "http://localhost:8642",
-      apiKey: process.env.HERMES_API_KEY || "",
-    };
-  }
-}
+const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
 
 /**
  * GET /api/hermes
- * Check hermes-agent health and list available models.
- * Returns connection status, health data, model list, and current config.
+ * Check hermes-api (mini-service on port 8643) health, models, and config.
  */
 export async function GET() {
   try {
-    const config = await getHermesConfig();
-    const headers: Record<string, string> = {};
-    if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
-
-    // Health check + models in parallel
-    const [healthResult, modelsResult] = await Promise.allSettled([
-      fetch(`${config.url}/health`, {
-        headers,
+    // Health, models, and config in parallel
+    const [healthResult, modelsResult, configResult] = await Promise.allSettled([
+      fetch(`${HERMES_API}/health`, {
         signal: AbortSignal.timeout(5000),
       }).then((r) => r.json()),
-      fetch(`${config.url}/v1/models`, {
-        headers,
+      fetch(`${HERMES_API}/v1/models`, {
         signal: AbortSignal.timeout(8000),
+      }).then((r) => r.json()),
+      fetch(`${HERMES_API}/v1/config`, {
+        signal: AbortSignal.timeout(5000),
       }).then((r) => r.json()),
     ]);
 
@@ -62,11 +42,16 @@ export async function GET() {
       );
     }
 
+    let configData: unknown = null;
+    if (configResult.status === "fulfilled") {
+      configData = configResult.value;
+    }
+
     return NextResponse.json({
       status: healthStatus,
       health: healthData,
       models,
-      config: { url: config.url, hasApiKey: !!config.apiKey },
+      config: configData,
     });
   } catch (error) {
     console.error("[Hermes API] Error:", error);
@@ -74,46 +59,59 @@ export async function GET() {
       status: "error",
       health: null,
       models: [],
-      config: { url: "", hasApiKey: false },
-      error: "Failed to connect to Hermes Agent",
+      config: null,
+      error: "Failed to connect to Hermes API service",
     });
   }
 }
 
 /**
  * PUT /api/hermes
- * Update hermes-agent connection config in the database.
+ * Save hermes connection config to local DB and optionally forward to hermes-api config.
  */
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { hermes_url, hermes_api_key } = body;
 
-    if (hermes_url !== undefined) {
+    // Save relevant fields to local DB for session persistence
+    if (body.hermes_url !== undefined) {
       await db.agentConfig.upsert({
         where: { key: "hermes_url" },
-        update: { value: String(hermes_url) },
+        update: { value: String(body.hermes_url) },
         create: {
           key: "hermes_url",
-          value: String(hermes_url),
+          value: String(body.hermes_url),
           label: "Hermes Agent URL",
           group: "hermes",
         },
       });
     }
 
-    if (hermes_api_key !== undefined) {
+    if (body.hermes_api_key !== undefined) {
       await db.agentConfig.upsert({
         where: { key: "hermes_api_key" },
-        update: { value: String(hermes_api_key) },
+        update: { value: String(body.hermes_api_key) },
         create: {
           key: "hermes_api_key",
-          value: String(hermes_api_key),
+          value: String(body.hermes_api_key),
           label: "Hermes API Key",
           group: "hermes",
           type: "secret",
         },
       });
+    }
+
+    // Forward config to hermes-api if config payload is present
+    if (body.config && typeof body.config === "object") {
+      try {
+        await fetch(`${HERMES_API}/v1/config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body.config),
+        });
+      } catch (forwardError) {
+        console.warn("[Hermes API] Failed to forward config to hermes-api:", forwardError);
+      }
     }
 
     return NextResponse.json({ success: true });

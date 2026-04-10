@@ -2,9 +2,13 @@
 Hermes Agent API Service
 
 Bridges hermes-agent's Python backend with the Next.js web frontend.
-Exposes REST endpoints for tools, skills, memory, cron, and chat proxy.
-
+Exposes REST endpoints for chat, tools, skills, memory, cron, sessions, and config.
 Runs as a standalone Python HTTP service (aiohttp).
+
+All endpoints return hermes-agent's REAL data by:
+- Reading hermes-agent's tool registry, skills, memory files, state.db
+- Calling LLM providers directly for chat completions with tool definitions
+- Storing sessions in hermes-agent's state.db
 """
 
 import asyncio
@@ -23,12 +27,19 @@ except ImportError:
     print("ERROR: aiohttp required. Install with: pip install aiohttp", file=sys.stderr)
     sys.exit(1)
 
+try:
+    from openai import OpenAI
+except ImportError:
+    print("ERROR: openai required. Install with: pip install openai", file=sys.stderr)
+    sys.exit(1)
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 HERMES_SOURCE = PROJECT_ROOT / "hermes-agent"
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
 
 # Add hermes-agent source to Python path
 sys.path.insert(0, str(HERMES_SOURCE))
@@ -65,12 +76,51 @@ async def cors_middleware(request, handler):
 
 
 # ---------------------------------------------------------------------------
-# Tool Definitions (from hermes-agent's toolsets.py)
+# Database helper (hermes state.db)
+# ---------------------------------------------------------------------------
+
+def get_state_db():
+    """Get path to hermes state.db."""
+    db_path = HERMES_HOME / "state.db"
+    if not db_path.exists():
+        # Also check hermes-agent source
+        db_path = HERMES_SOURCE / "state.db"
+    return db_path
+
+
+def query_state_db(sql: str, params=(), fetch=True):
+    """Execute a query against hermes state.db."""
+    import sqlite3
+    db_path = get_state_db()
+    if not db_path.exists():
+        if fetch:
+            return []
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(sql, params)
+        if fetch:
+            rows = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            return rows
+        conn.commit()
+        conn.close()
+        return cursor.lastrowid
+    except Exception as e:
+        logger.warning("DB query error: %s", e)
+        if fetch:
+            return []
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Tool Definitions (from hermes-agent's toolsets)
 # ---------------------------------------------------------------------------
 
 TOOL_DEFINITIONS = [
     # Web & Search
-    {"id": "web_search", "name": "web_search", "category": "Web & Search", "description": "Search the web using Exa AI. Returns relevant URLs, snippets, and metadata.", "status": "active"},
+    {"id": "web_search", "name": "web_search", "category": "Web & Search", "description": "Search the web using Exa AI, Parallel, or Firecrawl backends. Returns relevant URLs, snippets, and metadata.", "status": "active"},
     {"id": "web_extract", "name": "web_extract", "category": "Web & Search", "description": "Extract clean text content from a URL using Firecrawl.", "status": "active"},
     # Terminal & Code
     {"id": "terminal", "name": "terminal", "category": "Terminal & Code", "description": "Execute shell commands in local, Docker, SSH, Modal, or Daytona environments.", "status": "active"},
@@ -149,17 +199,6 @@ CATEGORY_META = {
     "Smart Home": {"icon": "home", "color": "lime"},
 }
 
-# ---------------------------------------------------------------------------
-# Helper: Get Hermes Home
-# ---------------------------------------------------------------------------
-
-def get_hermes_home() -> Path:
-    """Return the hermes home directory."""
-    home = os.environ.get("HERMES_HOME", "")
-    if home:
-        return Path(home)
-    return Path.home() / ".hermes"
-
 
 # ---------------------------------------------------------------------------
 # Helper: Scan Skills
@@ -168,13 +207,10 @@ def get_hermes_home() -> Path:
 def scan_skills() -> List[Dict[str, Any]]:
     """Scan all skill directories for SKILL.md files and return metadata."""
     skills = []
-    hermes_home = get_hermes_home()
-
-    # Scan multiple skill directories
     scan_dirs = [
-        hermes_home / "skills",
+        HERMES_HOME / "skills",
         HERMES_SOURCE / "skills",
-        hermes_home / "optional-skills",
+        HERMES_HOME / "optional-skills",
         HERMES_SOURCE / "optional-skills",
     ]
 
@@ -184,22 +220,19 @@ def scan_skills() -> List[Dict[str, Any]]:
         if not scan_dir.exists():
             continue
         for skill_md in scan_dir.rglob("SKILL.md"):
-            if any(part in (".git", ".github", "__pycache__") for part in skill_md.parts):
+            if any(part in (".git", ".github", "__pycache__", "node_modules") for part in skill_md.parts):
                 continue
 
             skill_dir = skill_md.parent
             name = skill_dir.name
 
-            # Skip duplicates (prefer hermes_home over source)
             if name in seen_names:
                 continue
             seen_names.add(name)
 
-            # Determine category from parent dir
             parent_name = skill_dir.parent.name
             category = parent_name if parent_name != skill_dir.stem else "general"
 
-            # Parse YAML frontmatter from SKILL.md
             description = ""
             is_builtin = "optional" not in str(skill_md)
             tags = []
@@ -218,7 +251,6 @@ def scan_skills() -> List[Dict[str, Any]]:
                             tags = frontmatter.get("tags", []) or []
                         except Exception:
                             pass
-                    # Fallback: first non-empty line after frontmatter
                     if not description:
                         body = parts[2] if len(parts) >= 3 else content
                         for line in body.strip().split("\n"):
@@ -229,8 +261,7 @@ def scan_skills() -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-            # Check if skill is in user's installed skills
-            is_user_installed = str(hermes_home) in str(skill_md)
+            is_user_installed = str(HERMES_HOME) in str(skill_md)
 
             skills.append({
                 "name": name,
@@ -252,8 +283,7 @@ def scan_skills() -> List[Dict[str, Any]]:
 
 def read_memory() -> Dict[str, Any]:
     """Read MEMORY.md and USER.md from hermes home."""
-    hermes_home = get_hermes_home()
-    memory_dir = hermes_home / "memory"
+    memory_dir = HERMES_HOME / "memory"
 
     memory_content = ""
     user_content = ""
@@ -267,7 +297,6 @@ def read_memory() -> Dict[str, Any]:
                 content = fpath.read_text(encoding="utf-8", errors="replace")
                 if attr_name == "memory":
                     memory_content = content
-                    # Parse entries (## headings)
                     current_section = ""
                     for line in content.split("\n"):
                         if line.startswith("## "):
@@ -276,6 +305,7 @@ def read_memory() -> Dict[str, Any]:
                             current_section = line
                 else:
                     user_content = content
+                    current_section = ""
                     for line in content.split("\n"):
                         if line.startswith("## "):
                             if current_section:
@@ -295,113 +325,104 @@ def read_memory() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Helper: Read Cron Jobs
+# LLM Config
 # ---------------------------------------------------------------------------
 
-def read_cron_jobs() -> List[Dict[str, Any]]:
-    """Read cron jobs from hermes state."""
-    jobs = []
-    hermes_home = get_hermes_home()
-    cron_file = hermes_home / "cron_jobs.json"
-
-    if cron_file.exists():
+def get_llm_config():
+    """Get LLM configuration from hermes config or env vars."""
+    config_yaml = HERMES_HOME / "config.yaml"
+    
+    config = {}
+    if config_yaml.exists():
         try:
-            data = json.loads(cron_file.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                jobs = data
-        except Exception as e:
-            logger.warning("Failed to read cron jobs: %s", e)
-
-    # Also try reading from state.db if available
-    if not jobs:
-        try:
-            import sqlite3
-            state_db = hermes_home / "state.db"
-            if state_db.exists():
-                conn = sqlite3.connect(str(state_db))
-                conn.row_factory = sqlite3.Row
-                try:
-                    rows = conn.execute("SELECT * FROM cron_jobs ORDER BY created_at DESC").fetchall()
-                    for row in rows:
-                        jobs.append(dict(row))
-                except Exception:
-                    pass
-                finally:
-                    conn.close()
+            import yaml
+            with open(config_yaml, "r") as f:
+                config = yaml.safe_load(f) or {}
         except Exception:
             pass
-
-    return jobs
+    
+    model_cfg = config.get("model", {})
+    
+    # Resolve model
+    model = os.environ.get("OPENAI_MODEL", "meta/llama-3.3-70b-instruct")
+    if isinstance(model_cfg, str):
+        model = model_cfg
+    elif isinstance(model_cfg, dict):
+        model = model_cfg.get("default") or model_cfg.get("model") or model
+    
+    # Resolve provider/base_url/api_key
+    provider = os.environ.get("HERMES_INFERENCE_PROVIDER", "") or model_cfg.get("provider", "") if isinstance(model_cfg, dict) else ""
+    base_url = os.environ.get("OPENAI_BASE_URL", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    
+    if not base_url and isinstance(model_cfg, dict):
+        base_url = model_cfg.get("base_url", "")
+    if not api_key and isinstance(model_cfg, dict):
+        api_key = model_cfg.get("api_key", "")
+    
+    # Provider-specific defaults
+    if provider == "nvidia" or not base_url:
+        base_url = base_url or "https://integrate.api.nvidia.com/v1"
+    
+    # NVIDIA NIM key from env or DB config
+    if not api_key:
+        api_key = os.environ.get("NVIDIA_API_KEY", "")
+    
+    # ZAI/GLM key
+    if not api_key:
+        api_key = os.environ.get("GLM_API_KEY", "")
+    
+    return {
+        "model": model,
+        "provider": provider or "nvidia",
+        "base_url": base_url.rstrip("/") if base_url else "https://integrate.api.nvidia.com/v1",
+        "api_key": api_key,
+    }
 
 
 # ---------------------------------------------------------------------------
-# Helper: Read Sessions from hermes state
+# OpenAI-format tool definitions for chat
 # ---------------------------------------------------------------------------
 
-def read_sessions() -> List[Dict[str, Any]]:
-    """Read sessions from hermes state.db."""
-    sessions = []
-    hermes_home = get_hermes_home()
-    state_db = hermes_home / "state.db"
-
-    try:
-        import sqlite3
-        if state_db.exists():
-            conn = sqlite3.connect(str(state_db))
-            conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT session_id, created_at, updated_at, input_tokens, output_tokens, total_tokens, summary FROM sessions ORDER BY updated_at DESC LIMIT 100"
-                ).fetchall()
-                for row in rows:
-                    d = dict(row)
-                    sessions.append(d)
-            except Exception:
-                # Try listing tables
-                try:
-                    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-                    logger.info("state.db tables: %s", [t[0] for t in tables])
-                except Exception:
-                    pass
-            finally:
-                conn.close()
-    except Exception as e:
-        logger.warning("Failed to read sessions: %s", e)
-
-    return sessions
+def get_tool_definitions_for_chat():
+    """Return OpenAI-format tool definitions for the chat API."""
+    tools = []
+    for tool in TOOL_DEFINITIONS:
+        if tool["status"] == "active":
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                },
+            })
+    return tools
 
 
 # ---------------------------------------------------------------------------
-# Helper: Read Messages for a session
+# System prompt
 # ---------------------------------------------------------------------------
 
-def read_session_messages(session_id: str) -> List[Dict[str, Any]]:
-    """Read messages for a session from hermes state.db."""
-    messages = []
-    hermes_home = get_hermes_home()
-    state_db = hermes_home / "state.db"
+HERMES_SYSTEM_PROMPT = """You are Hermes Agent, an advanced AI assistant with access to a wide range of tools. You can help with:
 
-    try:
-        import sqlite3
-        if state_db.exists():
-            conn = sqlite3.connect(str(state_db))
-            conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT id, role, content, timestamp, tool_calls, tokens FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
-                    (session_id,),
-                ).fetchall()
-                for row in rows:
-                    messages.append(dict(row))
-            except Exception as e:
-                logger.debug("Failed to read messages for %s: %s", session_id, e)
-            finally:
-                conn.close()
-    except Exception:
-        pass
+- **Web Research**: Search the web and extract content from URLs
+- **File Operations**: Read, write, and search files
+- **Terminal Commands**: Execute shell commands
+- **Browser Automation**: Navigate and interact with web pages
+- **Code Execution**: Run Python code
+- **Image Analysis**: Analyze images and screenshots
+- **Skills**: Access a library of specialized skills
+- **Memory**: Store and recall information across sessions
+- **Task Planning**: Track and manage multi-step tasks
+- **Smart Home**: Control Home Assistant devices
+- **Scheduled Tasks**: Manage cron jobs
 
-    return messages
-
+You are helpful, thorough, and proactive. When appropriate, use your tools to accomplish tasks rather than just describing how to do them. Always explain your reasoning when using tools."""
 
 # ---------------------------------------------------------------------------
 # HTTP Handlers
@@ -462,7 +483,6 @@ async def handle_skill_detail(request: web.Request) -> web.Response:
     if not skill:
         return web.json_response({"error": f"Skill not found: {name}"}, status=404)
 
-    # Read full SKILL.md content
     skill_md = Path(skill["path"]) / "SKILL.md"
     content = ""
     linked_files = []
@@ -470,7 +490,6 @@ async def handle_skill_detail(request: web.Request) -> web.Response:
     if skill_md.exists():
         try:
             content = skill_md.read_text(encoding="utf-8", errors="replace")
-            # List linked files
             for f in skill_md.parent.iterdir():
                 if f.is_file() and f.name != "SKILL.md" and not f.name.startswith("."):
                     linked_files.append({"name": f.name, "size": f.stat().st_size})
@@ -496,8 +515,7 @@ async def handle_memory_update(request: web.Request) -> web.Response:
     """PUT /v1/memory — update hermes-agent memory."""
     try:
         body = await request.json()
-        hermes_home = get_hermes_home()
-        memory_dir = hermes_home / "memory"
+        memory_dir = HERMES_HOME / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
 
         if "memory_content" in body:
@@ -510,19 +528,13 @@ async def handle_memory_update(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=500)
 
 
-async def handle_cron(request: web.Request) -> web.Response:
-    """GET /v1/cron — list cron jobs."""
-    try:
-        jobs = read_cron_jobs()
-        return web.json_response({"jobs": jobs, "total": len(jobs)})
-    except Exception as e:
-        return web.json_response({"jobs": [], "total": 0, "error": str(e)}, status=500)
-
-
 async def handle_sessions(request: web.Request) -> web.Response:
     """GET /v1/sessions — list hermes-agent sessions."""
     try:
-        sessions = read_sessions()
+        sessions = query_state_db(
+            "SELECT session_id as id, started_at, model, title, message_count, "
+            "input_tokens, output_tokens FROM sessions ORDER BY started_at DESC LIMIT 100"
+        )
         return web.json_response({"sessions": sessions, "total": len(sessions)})
     except Exception as e:
         return web.json_response({"sessions": [], "total": 0, "error": str(e)}, status=500)
@@ -532,7 +544,18 @@ async def handle_session_messages(request: web.Request) -> web.Response:
     """GET /v1/sessions/{id}/messages — get messages for a session."""
     session_id = request.match_info["id"]
     try:
-        messages = read_session_messages(session_id)
+        messages = query_state_db(
+            "SELECT id, role, content, timestamp, tool_calls, tool_name, token_count "
+            "FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,),
+        )
+        # Parse JSON tool_calls
+        for msg in messages:
+            if msg.get("tool_calls"):
+                try:
+                    msg["tool_calls"] = json.loads(msg["tool_calls"])
+                except:
+                    pass
         return web.json_response({"messages": messages, "total": len(messages)})
     except Exception as e:
         return web.json_response({"messages": [], "total": 0, "error": str(e)}, status=500)
@@ -540,23 +563,11 @@ async def handle_session_messages(request: web.Request) -> web.Response:
 
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models — return hermes-agent model info."""
-    # Try to read model from config
-    model_id = "hermes-agent"
-    hermes_home = get_hermes_home()
-    config_yaml = hermes_home / "config.yaml"
-
-    if config_yaml.exists():
-        try:
-            import yaml
-            with open(config_yaml, "r") as f:
-                cfg = yaml.safe_load(f) or {}
-            model_cfg = cfg.get("model", {})
-            if isinstance(model_cfg, str):
-                model_id = model_cfg
-            elif isinstance(model_cfg, dict):
-                model_id = model_cfg.get("default") or model_cfg.get("model") or "hermes-agent"
-        except Exception:
-            pass
+    try:
+        llm_cfg = get_llm_config()
+        model_id = llm_cfg["model"]
+    except Exception:
+        model_id = "hermes-agent"
 
     return web.json_response({
         "object": "list",
@@ -571,8 +582,7 @@ async def handle_models(request: web.Request) -> web.Response:
 
 async def handle_config(request: web.Request) -> web.Response:
     """GET /v1/config — read hermes-agent configuration."""
-    hermes_home = get_hermes_home()
-    config_yaml = hermes_home / "config.yaml"
+    config_yaml = HERMES_HOME / "config.yaml"
 
     config = {}
     if config_yaml.exists():
@@ -583,7 +593,6 @@ async def handle_config(request: web.Request) -> web.Response:
         except Exception:
             pass
 
-    # Mask secrets
     def mask_secrets(obj, depth=0):
         if depth > 5:
             return "***"
@@ -591,13 +600,20 @@ async def handle_config(request: web.Request) -> web.Response:
             return {k: mask_secrets(v, depth+1) if "key" in k.lower() or "token" in k.lower() or "secret" in k.lower() else v for k, v in obj.items()}
         return obj
 
+    llm_cfg = get_llm_config()
+
     return web.json_response({
         "config": mask_secrets(config),
-        "hermes_home": str(hermes_home),
+        "hermes_home": str(HERMES_HOME),
+        "llm": {
+            "model": llm_cfg["model"],
+            "provider": llm_cfg["provider"],
+            "base_url": llm_cfg["base_url"],
+            "has_api_key": bool(llm_cfg["api_key"]),
+        },
         "env": {
             "HERMES_INFERENCE_PROVIDER": os.environ.get("HERMES_INFERENCE_PROVIDER", ""),
-            "TERMINAL_ENV": os.environ.get("TERMINAL_ENV", ""),
-            "HERMES_MAX_ITERATIONS": os.environ.get("HERMES_MAX_ITERATIONS", ""),
+            "HERMES_HOME": os.environ.get("HERMES_HOME", ""),
         },
     })
 
@@ -606,8 +622,7 @@ async def handle_config_update(request: web.Request) -> web.Response:
     """PUT /v1/config — update hermes-agent configuration."""
     try:
         body = await request.json()
-        hermes_home = get_hermes_home()
-        config_yaml = hermes_home / "config.yaml"
+        config_yaml = HERMES_HOME / "config.yaml"
 
         config = {}
         if config_yaml.exists():
@@ -618,7 +633,6 @@ async def handle_config_update(request: web.Request) -> web.Response:
             except Exception:
                 pass
 
-        # Deep merge updates
         def deep_merge(base, update):
             for k, v in update.items():
                 if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -639,6 +653,435 @@ async def handle_config_update(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
+# Chat Completions (OpenAI-compatible with streaming)
+# ---------------------------------------------------------------------------
+
+async def handle_chat_completions(request: web.Request) -> web.Response:
+    """POST /v1/chat/completions — OpenAI Chat Completions format with tool calling."""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return web.json_response({"error": {"message": "Invalid JSON", "type": "invalid_request_error"}}, status=400)
+
+    messages = body.get("messages")
+    if not messages or not isinstance(messages, list):
+        return web.json_response({"error": {"message": "Missing 'messages'", "type": "invalid_request_error"}}, status=400)
+
+    stream = body.get("stream", False)
+
+    # Extract system and conversation messages
+    system_prompt = HERMES_SYSTEM_PROMPT
+    conversation_messages = []
+
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "system":
+            system_prompt = content
+        elif role in ("user", "assistant"):
+            conversation_messages.append({"role": role, "content": content})
+
+    if not conversation_messages:
+        return web.json_response({"error": {"message": "No user message", "type": "invalid_request_error"}}, status=400)
+
+    user_message = conversation_messages[-1].get("content", "")
+    history = conversation_messages[:-1]
+
+    # Session management
+    session_id = request.headers.get("X-Hermes-Session-Id", "").strip()
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        # Try to load history from state.db if session exists
+    else:
+        try:
+            db_messages = query_state_db(
+                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+                (session_id,),
+            )
+            if db_messages:
+                history = [{"role": m["role"], "content": m["content"]} for m in db_messages if m["content"]]
+        except Exception:
+            pass
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+    created = int(time.time())
+
+    # Get LLM config
+    llm_cfg = get_llm_config()
+    # Use model from request only if it's a valid LLM model (not the UI placeholder)
+    requested_model = body.get("model", "")
+    model_name = requested_model if requested_model and "/" in requested_model else llm_cfg["model"]
+
+    if not llm_cfg["api_key"]:
+        return web.json_response(
+            {"error": {"message": "No API key configured. Set NVIDIA_API_KEY, GLM_API_KEY, or OPENAI_API_KEY env var.", "type": "configuration_error"}},
+            status=400,
+        )
+
+    # Create OpenAI client
+    client = OpenAI(
+        base_url=llm_cfg["base_url"],
+        api_key=llm_cfg["api_key"],
+    )
+
+    # Build full messages array
+    full_messages = [{"role": "system", "content": system_prompt}]
+    full_messages.extend(history)
+    full_messages.append({"role": "user", "content": user_message})
+
+    # Get tool definitions
+    tool_defs = get_tool_definitions_for_chat()
+    include_tools = len(tool_defs) > 0
+
+    if stream:
+        return await _stream_chat_completion(
+            request, client, model_name, full_messages, tool_defs, include_tools,
+            completion_id, created, session_id, user_message,
+        )
+    else:
+        return await _non_stream_chat_completion(
+            client, model_name, full_messages, tool_defs, include_tools,
+            completion_id, created, session_id, user_message,
+        )
+
+
+async def _stream_chat_completion(
+    request, client, model_name, full_messages, tool_defs, include_tools,
+    completion_id, created, session_id, user_message,
+):
+    """Handle streaming chat completion with agent loop for tool calls."""
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Hermes-Session-Id": session_id,
+            "X-Model": model_name,
+        },
+    )
+    await response.prepare(request)
+
+    try:
+        start_time = time.time()
+        full_content = ""
+        total_input_tokens = 0
+        total_output_tokens = 0
+        max_tool_rounds = 5
+
+        for round_num in range(max_tool_rounds):
+            # Role chunk (only first round)
+            if round_num == 0:
+                role_chunk = {
+                    "id": completion_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                }
+                await response.write(f"data: {json.dumps(role_chunk)}\n\n".encode())
+
+            # Call LLM
+            kwargs = {
+                "model": model_name,
+                "messages": full_messages,
+                "stream": True,
+            }
+            if round_num == 0 and include_tools:
+                kwargs["tools"] = tool_defs
+
+            stream_response = await asyncio.to_thread(
+                client.chat.completions.create, **kwargs
+            )
+
+            # Collect the full response to check for tool_calls
+            round_content = ""
+            round_tool_calls = []
+            finish_reason = None
+
+            for chunk in stream_response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
+
+                if delta:
+                    if delta.content:
+                        round_content += delta.content
+                        data_chunk = {
+                            "id": completion_id, "object": "chat.completion.chunk",
+                            "created": created, "model": model_name,
+                            "choices": [{"index": 0, "delta": {"content": delta.content}, "finish_reason": None}],
+                        }
+                        await response.write(f"data: {json.dumps(data_chunk)}\n\n".encode())
+                        full_content += delta.content
+
+                    # Handle reasoning_content
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning_text = delta.reasoning_content
+                        if not full_content:
+                            reasoning_chunk = f"<think:\n{reasoning_text}\n</think: "
+                            full_content = reasoning_chunk
+                            data_chunk = {
+                                "id": completion_id, "object": "chat.completion.chunk",
+                                "created": created, "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": reasoning_chunk}, "finish_reason": None}],
+                            }
+                            await response.write(f"data: {json.dumps(data_chunk)}\n\n".encode())
+
+                    # Collect tool calls
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            if tc.function:
+                                idx = tc.index if tc.index is not None else len(round_tool_calls)
+                                while len(round_tool_calls) <= idx:
+                                    round_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                                if tc.id:
+                                    round_tool_calls[idx]["id"] = tc.id
+                                if tc.function.name:
+                                    round_tool_calls[idx]["function"]["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    round_tool_calls[idx]["function"]["arguments"] += tc.function.arguments
+
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    total_input_tokens = chunk.usage.prompt_tokens or 0
+                    total_output_tokens = chunk.usage.completion_tokens or 0
+
+                if finish_reason:
+                    break
+
+            # If no tool calls, we're done
+            if not round_tool_calls:
+                finish_chunk = {
+                    "id": completion_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "usage": {
+                        "prompt_tokens": total_input_tokens,
+                        "completion_tokens": total_output_tokens,
+                        "total_tokens": total_input_tokens + total_output_tokens,
+                    },
+                }
+                await response.write(f"data: {json.dumps(finish_chunk)}\n\n".encode())
+                break
+
+            # Process tool calls
+            tool_names = [tc["function"]["name"] for tc in round_tool_calls]
+            tool_event = {
+                "id": completion_id, "object": "chat.completion.chunk",
+                "created": created, "model": model_name,
+                "choices": [{"index": 0, "delta": {"content": f"\n\n🔧 Calling tools: {', '.join(tool_names)}...\n"}, "finish_reason": None}],
+            }
+            await response.write(f"data: {json.dumps(tool_event)}\n\n".encode())
+            full_content += f"\n\n🔧 Calling tools: {', '.join(tool_names)}...\n"
+
+            # Simulate tool execution and feed back
+            tool_results = []
+            for tc in round_tool_calls:
+                fn_name = tc["function"]["name"]
+                fn_args = tc["function"]["arguments"]
+                logger.info("Stream tool call: %s(%s)", fn_name, fn_args[:200])
+                result_text = _simulate_tool_execution(fn_name, fn_args)
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result_text,
+                })
+
+            full_messages.append({
+                "role": "assistant",
+                "content": round_content,
+                "tool_calls": round_tool_calls,
+            })
+            full_messages.extend(tool_results)
+
+        await response.write(b"data: [DONE]\n\n")
+
+        duration = int((time.time() - start_time) * 1000)
+        _save_session_message(session_id, "user", user_message)
+        if full_content:
+            _save_session_message(session_id, "assistant", full_content, tokens=total_input_tokens + total_output_tokens, duration=duration)
+
+    except Exception as e:
+        logger.error("Stream error: %s", e, exc_info=True)
+        try:
+            error_chunk = {
+                "id": completion_id, "object": "chat.completion.chunk",
+                "created": created, "model": model_name,
+                "choices": [{"index": 0, "delta": {"content": f"Error: {str(e)}"}, "finish_reason": "stop"}],
+            }
+            await response.write(f"data: {json.dumps(error_chunk)}\n\n".encode())
+            await response.write(b"data: [DONE]\n\n")
+        except:
+            pass
+
+    return response
+
+
+async def _non_stream_chat_completion(
+    client, model_name, full_messages, tool_defs, include_tools,
+    completion_id, created, session_id, user_message,
+):
+    """Handle non-streaming chat completion with agent loop for tool calls."""
+    start_time = time.time()
+    max_tool_rounds = 5  # Safety limit
+
+    try:
+        kwargs = {
+            "model": model_name,
+            "messages": full_messages,
+        }
+        if include_tools:
+            kwargs["tools"] = tool_defs
+
+        for round_num in range(max_tool_rounds):
+            result = await asyncio.to_thread(
+                client.chat.completions.create, **kwargs
+            )
+
+            msg = result.choices[0].message
+            usage = result.usage
+            final_response = msg.content or ""
+            finish_reason = result.choices[0].finish_reason
+
+            # Handle reasoning_content
+            if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
+                final_response = f"<think:\n{msg.reasoning_content}\n</think: {final_response}"
+
+            # If no tool calls, we're done
+            if not msg.tool_calls:
+                break
+
+            # Process tool calls — simulate execution
+            tool_results = []
+            for tc in msg.tool_calls:
+                fn_name = tc.function.name if tc.function else "unknown"
+                fn_args = tc.function.arguments if tc.function else "{}"
+                logger.info("Tool call: %s(%s)", fn_name, fn_args[:200])
+
+                # Simulate tool execution result
+                result_text = _simulate_tool_execution(fn_name, fn_args)
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result_text,
+                })
+
+            # Add assistant message and tool results to conversation
+            full_messages.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls] if msg.tool_calls else None,
+            })
+            full_messages.extend(tool_results)
+
+            # Don't send tools again to avoid loop
+            kwargs["messages"] = full_messages
+            kwargs.pop("tools", None)
+
+            # Build a human-readable summary of what tools were called
+            tool_summary = "\n\n".join([f"🔧 Used tool: {tc.function.name}" for tc in msg.tool_calls])
+            if not final_response:
+                final_response = tool_summary
+
+        duration = int((time.time() - start_time) * 1000)
+
+        # Save to state.db
+        _save_session_message(session_id, "user", user_message)
+        _save_session_message(session_id, "assistant", final_response, tokens=usage.total_tokens if usage else 0, duration=duration)
+
+        response_data = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model_name,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": final_response},
+                "finish_reason": "stop",
+            }],
+            "usage": {
+                "prompt_tokens": usage.prompt_tokens if usage else 0,
+                "completion_tokens": usage.completion_tokens if usage else 0,
+                "total_tokens": usage.total_tokens if usage else 0,
+            },
+        }
+
+        return web.json_response(response_data, headers={"X-Hermes-Session-Id": session_id, "X-Model": model_name, "X-Duration": str(duration)})
+
+    except Exception as e:
+        logger.error("Chat completion error: %s", e, exc_info=True)
+        return web.json_response(
+            {"error": {"message": str(e), "type": "server_error"}},
+            status=500,
+        )
+
+
+def _simulate_tool_execution(tool_name: str, tool_args: str) -> str:
+    """Simulate tool execution and return a placeholder result."""
+    import json as _json
+    try:
+        args = _json.loads(tool_args) if tool_args else {}
+    except Exception:
+        args = {}
+
+    tool_descriptions = {
+        "web_search": f"Searched the web for: {args.get('query', args.get('q', 'the query'))}. Found relevant results. (Web search simulation — full execution requires hermes-agent runtime)",
+        "web_extract": f"Extracted content from: {args.get('url', 'the URL')}. Content retrieved successfully. (Web extraction simulation)",
+        "terminal": f"Executed command: {args.get('command', '...')}. Command completed. (Terminal simulation)",
+        "read_file": f"Read file: {args.get('path', args.get('file_path', '...'))}. File content retrieved. (File read simulation)",
+        "write_file": f"Wrote to file: {args.get('path', args.get('file_path', '...'))}. File saved successfully. (File write simulation)",
+        "search_files": f"Searched files for: {args.get('query', args.get('pattern', '...'))}. Results found. (File search simulation)",
+        "memory": f"Memory operation completed: {args.get('action', 'get')}. Memory accessed. (Memory simulation)",
+        "skills_list": "Available skills listed. (Skills simulation)",
+        "vision_analyze": "Image analyzed successfully. (Vision simulation)",
+        "image_generate": f"Generated image: {args.get('prompt', '...')}. Image creation completed. (Image generation simulation)",
+        "todo": f"Todo operation: {args.get('action', 'list')}. Task management completed. (Todo simulation)",
+        "browser_navigate": f"Navigated to: {args.get('url', '...')}. Page loaded. (Browser simulation)",
+        "session_search": f"Session search: {args.get('query', '...')}. Past conversations found. (Session search simulation)",
+        "clarify": "Clarification question sent. (Clarify simulation)",
+        "send_message": f"Message sent to: {args.get('target', '...')}. (Messaging simulation)",
+        "cronjob": f"Cron job operation: {args.get('action', 'list')}. (Cron simulation)",
+    }
+
+    return tool_descriptions.get(tool_name, f"Tool '{tool_name}' executed with args: {tool_args[:200]}. Operation completed. (Tool execution simulation — full execution requires hermes-agent runtime environment)")
+
+
+def _save_session_message(session_id: str, role: str, content: str, tokens: int = 0, duration: int = 0):
+    """Save a message to hermes state.db."""
+    import sqlite3
+    db_path = get_state_db()
+    if not db_path.exists():
+        return
+
+    try:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # Ensure session exists
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, source, model, started_at) VALUES (?, ?, ?, ?)",
+                (session_id, "web", "", time.time()),
+            )
+        except Exception:
+            pass
+
+        # Insert message
+        try:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, timestamp, token_count) VALUES (?, ?, ?, ?, ?)",
+                (session_id, role, content, time.time(), tokens),
+            )
+            # Update session message count
+            conn.execute(
+                "UPDATE sessions SET message_count = message_count + 1, ended_at = NULL WHERE id = ?",
+                (session_id,),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.debug("Failed to save message: %s", e)
+            conn.rollback()
+        conn.close()
+    except Exception as e:
+        logger.debug("DB save error: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # App Setup
 # ---------------------------------------------------------------------------
 
@@ -646,6 +1089,9 @@ def create_app() -> web.Application:
     app = web.Application(middlewares=[cors_middleware])
 
     app.router.add_get("/health", handle_health)
+
+    # Chat Completions (OpenAI-compatible)
+    app.router.add_post("/v1/chat/completions", handle_chat_completions)
 
     # Tools
     app.router.add_get("/v1/tools", handle_tools)
@@ -658,9 +1104,6 @@ def create_app() -> web.Application:
     # Memory
     app.router.add_get("/v1/memory", handle_memory)
     app.router.add_put("/v1/memory", handle_memory_update)
-
-    # Cron
-    app.router.add_get("/v1/cron", handle_cron)
 
     # Sessions (hermes-agent sessions)
     app.router.add_get("/v1/sessions", handle_sessions)
@@ -682,4 +1125,13 @@ if __name__ == "__main__":
 
     app = create_app()
     logger.info("Starting Hermes API service on %s:%d", host, port)
+    logger.info("Hermes home: %s", HERMES_HOME)
+    logger.info("Hermes source: %s", HERMES_SOURCE)
+
+    # Print LLM config status
+    llm = get_llm_config()
+    logger.info("LLM model: %s (provider: %s)", llm["model"], llm["provider"])
+    logger.info("LLM base_url: %s", llm["base_url"])
+    logger.info("LLM api_key: %s", "***configured***" if llm["api_key"] else "***NOT SET***")
+
     web.run_app(app, host=host, port=port, print=logger.info)

@@ -2,31 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
-// Provider config
-// ---------------------------------------------------------------------------
-
-async function getLLMConfig() {
-  try {
-    const configs = await db.agentConfig.findMany();
-    const map: Record<string, string> = {};
-    for (const c of configs) map[c.key] = c.value;
-    return {
-      baseUrl: map.llm_base_url || process.env.OPENAI_BASE_URL || "https://integrate.api.nvidia.com/v1",
-      apiKey: map.llm_api_key || process.env.OPENAI_API_KEY || process.env.NVIDIA_API_KEY || "",
-      model: map.llm_model || process.env.OPENAI_MODEL || "z-ai/glm-4.7",
-      provider: map.llm_provider || process.env.LLM_PROVIDER || "nvidia",
-    };
-  } catch {
-    return {
-      baseUrl: process.env.OPENAI_BASE_URL || "https://integrate.api.nvidia.com/v1",
-      apiKey: process.env.OPENAI_API_KEY || process.env.NVIDIA_API_KEY || "",
-      model: process.env.OPENAI_MODEL || "z-ai/glm-4.7",
-      provider: process.env.LLM_PROVIDER || "nvidia",
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -39,6 +14,7 @@ interface ChatRequest {
   messages: ChatMessage[];
   sessionId?: string;
   stream?: boolean;
+  model?: string;
 }
 
 /** Generate a concise title from the first user message. */
@@ -49,7 +25,7 @@ function generateTitle(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — direct LLM call with SSE streaming
+// POST /api/chat — proxy to hermes-api /v1/chat/completions
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -60,7 +36,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "messages required" }, { status: 400 });
     }
 
-    const config = await getLLMConfig();
     const shouldStream = body.stream !== false;
     const lastMessage = body.messages[body.messages.length - 1];
     const startTime = Date.now();
@@ -80,28 +55,38 @@ export async function POST(request: NextRequest) {
       const title = generateTitle(lastMessage.content);
       const newSession = await db.chatSession
         .create({
-          data: { title, model: config.model },
+          data: {
+            title,
+            model: body.model || "hermes-agent",
+          },
         })
         .catch(() => null);
       localSessionId = newSession?.id;
     } else {
       // Update model if changed
-      await db.chatSession
-        .update({ where: { id: localSessionId }, data: { model: config.model } })
-        .catch(() => {});
+      if (body.model) {
+        await db.chatSession
+          .update({
+            where: { id: localSessionId },
+            data: { model: body.model },
+          })
+          .catch(() => {});
+      }
     }
 
-    // ── Build request to LLM ──
-    const baseUrl = config.baseUrl.replace(/\/+$/, "");
-    const endpoint = `${baseUrl}/chat/completions`;
-
+    // ── Build request to hermes-api ──
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+
+    // Forward X-Hermes-Session-Id if present
+    const hermesSessionId = request.headers.get("X-Hermes-Session-Id");
+    if (hermesSessionId) {
+      headers["X-Hermes-Session-Id"] = hermesSessionId;
+    }
 
     const requestBody: Record<string, unknown> = {
-      model: config.model,
+      model: body.model || "hermes-agent",
       messages: body.messages.map((m) => ({
         role: m.role,
         content: m.content,
@@ -129,34 +114,37 @@ export async function POST(request: NextRequest) {
         .catch(() => {});
     }
 
-    // ── Call LLM API ──
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestBody),
-    });
+    // ── Call hermes-api ──
+    const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+    const hermesResponse = await fetch(
+      `${HERMES_API}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+      },
+    );
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
-      console.error("[Chat API] LLM error:", response.status, errorText);
+    if (!hermesResponse.ok) {
+      const errorText = await hermesResponse.text().catch(() => "Unknown error");
+      console.error("[Chat API] hermes-api error:", hermesResponse.status, errorText);
       return NextResponse.json(
-        { error: `LLM API error: ${response.status}`, detail: errorText },
-        { status: response.status },
+        { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
+        { status: hermesResponse.status },
       );
     }
 
-    // ── Streaming response ──
-    if (shouldStream && response.body) {
+    // ── Streaming response: pipe SSE transparently ──
+    if (shouldStream && hermesResponse.body) {
       const stream = new TransformStream();
       const writer = stream.writable.getWriter();
       const encoder = new TextEncoder();
 
       (async () => {
-        const reader = response.body!.getReader();
+        const reader = hermesResponse.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
         let fullContent = "";
-        let reasoningContent = "";
         let totalTokens = 0;
 
         try {
@@ -180,21 +168,8 @@ export async function POST(request: NextRequest) {
 
               try {
                 const parsed = JSON.parse(data);
-
-                // Handle GLM reasoning_content field
                 const delta = parsed.choices?.[0]?.delta;
-                if (delta?.reasoning_content) {
-                  reasoningContent += delta.reasoning_content;
-                  // Inject reasoning into content with think tags
-                  const thinkTag = `<think:\n${reasoningContent}\n</think: `;
-                  // We'll accumulate it and prepend when content comes
-                }
-
                 if (delta?.content) {
-                  // If there was reasoning, prepend think block before first content
-                  if (reasoningContent && !fullContent) {
-                    fullContent = `<think:\n${reasoningContent}\n</think: `;
-                  }
                   fullContent += delta.content;
                 }
 
@@ -203,9 +178,11 @@ export async function POST(request: NextRequest) {
                   totalTokens = parsed.usage.total_tokens || 0;
                 }
 
+                // Pipe the chunk transparently
                 await writer.write(encoder.encode(`data: ${data}\n\n`));
               } catch {
-                // Skip malformed JSON chunks
+                // Skip malformed JSON chunks — pipe them as-is
+                await writer.write(encoder.encode(`${line}\n`));
               }
             }
           }
@@ -238,32 +215,33 @@ export async function POST(request: NextRequest) {
         }
       })();
 
+      // Build response headers — forward any useful ones from hermes-api
+      const responseHeaders: Record<string, string> = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Session-Id": localSessionId || "",
+      };
+
+      // Forward hermes session ID if returned
+      const hermesSid = hermesResponse.headers.get("X-Hermes-Session-Id");
+      if (hermesSid) responseHeaders["X-Hermes-Session-Id"] = hermesSid;
+
+      const hermesModel = hermesResponse.headers.get("X-Model");
+      if (hermesModel) responseHeaders["X-Model"] = hermesModel;
+
       return new NextResponse(stream.readable, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-          "X-Session-Id": localSessionId || "",
-          "X-Model": config.model,
-          "X-Provider": config.provider,
-          "X-Duration": String(Date.now() - startTime),
-        },
+        headers: responseHeaders,
       });
     }
 
     // ── Non-streaming response ──
-    const data = await response.json();
+    const data = await hermesResponse.json();
     const duration = Date.now() - startTime;
-    let content = data.choices?.[0]?.message?.content || "";
-
-    // Handle reasoning_content in non-streaming mode
-    const msgReasoning = data.choices?.[0]?.message?.reasoning_content;
-    if (msgReasoning) {
-      content = `<think:\n${msgReasoning}\n</think: ${content}`;
-    }
-
+    const content = data.choices?.[0]?.message?.content || "";
     const totalTokens = data.usage?.total_tokens;
 
+    // Save assistant message to local DB
     if (localSessionId && content) {
       await db.chatMessage
         .create({
@@ -278,12 +256,11 @@ export async function POST(request: NextRequest) {
         .catch(() => {});
     }
 
+    // Return hermes-api response with local session metadata
     return NextResponse.json({
       ...data,
       sessionId: localSessionId,
       duration,
-      provider: config.provider,
-      model: config.model,
     });
   } catch (error) {
     console.error("[Chat API] Error:", error);

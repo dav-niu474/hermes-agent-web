@@ -1,54 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const HERMES_API = process.env.HERMES_API_URL || "http://localhost:8643";
+
 /**
  * GET /api/config
- * Get all configuration as key-value pairs.
+ * Fetch hermes-agent configuration from hermes-api.
  */
 export async function GET() {
   try {
-    const { db } = await import("@/lib/db");
-    const configs = await db.agentConfig.findMany();
-    const map: Record<string, string> = {};
-    for (const c of configs) {
-      map[c.key] = c.value;
+    const hermesResponse = await fetch(`${HERMES_API}/v1/config`);
+
+    if (!hermesResponse.ok) {
+      console.error("[Config API] hermes-api error:", hermesResponse.status);
+      return NextResponse.json({});
     }
-    return NextResponse.json(map);
+
+    const data = await hermesResponse.json();
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("[Config API] GET error:", error);
-    // Return empty config when DB is not available
+    console.error("[Config API] Error:", error);
     return NextResponse.json({});
   }
 }
 
 /**
  * PUT /api/config
- * Update a configuration value (upsert).
+ * Update configuration via hermes-api /v1/config.
  */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { key, value, label, group, description } = body;
 
-    if (!key) {
-      return NextResponse.json({ error: "Key is required" }, { status: 400 });
-    }
-
-    const { db } = await import("@/lib/db");
-    const config = await db.agentConfig.upsert({
-      where: { key },
-      update: { value: String(value) },
-      create: {
-        key,
-        value: String(value),
-        label: label || key,
-        group: group || "general",
-        description: description || "",
-      },
+    const hermesResponse = await fetch(`${HERMES_API}/v1/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
 
-    return NextResponse.json({ key: config.key, value: config.value });
+    if (hermesResponse.ok) {
+      const data = await hermesResponse.json();
+      return NextResponse.json(data);
+    }
+
+    const errorText = await hermesResponse.text().catch(() => "Unknown error");
+    console.error("[Config API] hermes-api error:", hermesResponse.status, errorText);
+    return NextResponse.json(
+      { error: `hermes-api error: ${hermesResponse.status}`, detail: errorText },
+      { status: hermesResponse.status },
+    );
   } catch (error) {
-    console.error("[Config API] PUT error:", error);
-    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+    console.error("[Config API] Error:", error);
+    return NextResponse.json(
+      { error: "Failed to update config via hermes-api" },
+      { status: 500 },
+    );
   }
 }
