@@ -439,15 +439,21 @@
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
-/* Smooth transitions for theme switching */
-* {
+/* Smooth transitions for theme switching — only on themed containers */
+body, main, aside, header, nav, section, article, div, span, p {
   transition-property: background-color, border-color, color;
   transition-duration: 200ms;
   transition-timing-function: ease;
 }
 
 /* Override transition for interactive elements that need instant response */
-button, a, input, [role="button"] {
+button, a, input, [role="button"], label {
   transition-property: background-color, border-color, color, box-shadow, transform;
   transition-duration: 150ms;
+}
+
+/* Ensure touch scroll works on mobile for chat */
+.overflow-y-auto, .overflow-auto {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }

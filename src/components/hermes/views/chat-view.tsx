@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import {
   Send,
   Square,
@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Trash2,
   MoreHorizontal,
-  Sparkles,
   Globe,
   Code,
   Image,
@@ -26,20 +25,20 @@ import {
   Loader2,
   ChevronDown,
   Cpu,
+  ArrowDown,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
   Tooltip,
@@ -68,10 +67,10 @@ import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 
 const SUGGESTIONS = [
-  { text: 'Search the web for the latest AI news', icon: Globe, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  { text: 'Help me write a Python script for data processing', icon: Code, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-  { text: 'Analyze this image and describe its contents', icon: Image, color: 'text-rose-500', bg: 'bg-rose-500/10' },
-  { text: 'Create a scheduled daily task for me', icon: Clock, color: 'text-teal-500', bg: 'bg-teal-500/10' },
+  { text: 'Search the web for the latest AI news', icon: Globe, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
+  { text: 'Help me write a Python script for data processing', icon: Code, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-500/10' },
+  { text: 'Analyze this image and describe its contents', icon: Image, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-500/10' },
+  { text: 'Create a scheduled daily task for me', icon: Clock, color: 'text-teal-600', bg: 'bg-teal-50 dark:bg-teal-500/10' },
 ];
 
 /* ═════════════════════════════════════════════════════
@@ -144,7 +143,6 @@ const DEFAULT_MODEL = 'meta/llama-3.3-70b-instruct';
 function getModelName(modelId: string): string {
   const found = ALL_MODELS.find((m) => m.id === modelId);
   if (found) return found.name;
-  // Fallback: extract short name
   const parts = modelId.split('/');
   return parts[parts.length - 1] || modelId;
 }
@@ -184,7 +182,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   if (isSystem) {
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center my-3">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center my-4">
         <Badge variant="secondary" className="text-xs px-3 py-1 bg-muted/60 text-muted-foreground">
           {message.content}
         </Badge>
@@ -195,7 +193,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (isTool) {
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start my-2 px-4">
-        <div className="max-w-[80%] rounded-xl border border-border/60 bg-muted/30 p-3">
+        <div className="max-w-[85%] rounded-xl border border-border/60 bg-muted/30 p-3">
           <div className="flex items-center gap-2 mb-1">
             <Wrench className="size-3.5 text-muted-foreground" />
             <span className="text-xs font-mono font-medium text-muted-foreground">Tool Call</span>
@@ -207,47 +205,59 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     );
   }
 
+  const timeStr = message.createdAt
+    ? format(new Date(message.createdAt), 'HH:mm')
+    : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      className={cn('flex gap-3 my-3 px-4', isUser ? 'flex-row-reverse' : 'flex-row')}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+      className={cn('group flex gap-2.5 my-3 px-4', isUser ? 'flex-row-reverse' : 'flex-row')}
     >
-      <Avatar className={cn('size-8 shrink-0 mt-0.5', isUser ? 'bg-primary' : 'bg-muted')}>
-        <AvatarFallback className={cn('text-xs', isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
-          {isUser ? <User className="size-4" /> : <Bot className="size-4" />}
+      <Avatar className={cn('size-7 shrink-0 mt-1', isUser ? 'bg-primary' : 'bg-muted')}>
+        <AvatarFallback className={cn('text-[11px]', isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+          {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
         </AvatarFallback>
       </Avatar>
-      <div className={cn('max-w-[80%] min-w-0 flex flex-col gap-1.5', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('max-w-[85%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
         <div
           className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
-            isUser ? 'bg-primary text-primary-foreground rounded-tr-md' : 'bg-card border border-border/60 rounded-tl-md'
+            'rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
+            isUser
+              ? 'bg-primary text-primary-foreground rounded-tr-sm'
+              : 'bg-card border border-border/50 rounded-tl-sm shadow-sm'
           )}
         >
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <div className="markdown-content prose prose-sm max-w-none">
+            <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           )}
           {message.isStreaming && <span className="streaming-cursor" />}
         </div>
-        <div className={cn('flex items-center gap-2', isUser ? 'flex-row-reverse' : 'flex-row')}>
-          {!isUser && (
+        <div className={cn('flex items-center gap-1.5 px-1 h-4', isUser ? 'flex-row-reverse' : 'flex-row')}>
+          {timeStr && <span className="text-[10px] text-muted-foreground/60">{timeStr}</span>}
+          {!isUser && !message.isStreaming && message.content && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100 hover:opacity-100" onClick={handleCopy}>
-                  {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-5 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity"
+                  onClick={handleCopy}
+                >
+                  {copied ? <Check className="size-2.5 text-emerald-500" /> : <Copy className="size-2.5" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Copy response</TooltipContent>
+              <TooltipContent side="bottom" className="text-xs">Copy response</TooltipContent>
             </Tooltip>
           )}
-          {message.duration && <span className="text-[10px] text-muted-foreground">{(message.duration / 1000).toFixed(1)}s</span>}
-          {message.tokens && <span className="text-[10px] text-muted-foreground">{message.tokens} tokens</span>}
+          {message.duration && <span className="text-[10px] text-muted-foreground/60">{(message.duration / 1000).toFixed(1)}s</span>}
+          {message.tokens && <span className="text-[10px] text-muted-foreground/60">{message.tokens} tokens</span>}
         </div>
       </div>
     </motion.div>
@@ -260,17 +270,22 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string) => void }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-4 py-12">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-center max-w-lg">
+    <div className="flex items-center justify-center h-full px-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="text-center max-w-md w-full"
+      >
         <motion.div
-          className="relative mx-auto w-20 h-20 mb-6"
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+          className="relative mx-auto w-16 h-16 mb-5"
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
         >
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 via-primary/5 to-transparent blur-md" />
-          <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center shadow-xl shadow-primary/20">
-            <svg viewBox="0 0 24 24" fill="none" className="w-10 h-10 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/25 to-transparent blur-xl" />
+          <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg shadow-primary/20">
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3C8 3 5 6 4.5 10L4 13H20L19.5 10C19 6 16 3 12 3Z" />
               <path d="M3 13C3 13 4 15 12 15C20 15 21 13 21 13" />
               <path d="M4.5 10L2 8.5C1.5 8 1 8.5 1.5 9L4.5 12" />
@@ -278,27 +293,40 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
             </svg>
           </div>
         </motion.div>
-        <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="text-2xl font-bold tracking-tight mb-2">
-          Welcome to Hermes Agent
+        <motion.h1
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="text-xl font-bold tracking-tight mb-1.5"
+        >
+          Hermes Agent
         </motion.h1>
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="text-muted-foreground text-sm mb-8">
-          Your self-improving AI assistant with multi-model support, persistent memory, and powerful tools.
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.25 }}
+          className="text-muted-foreground text-sm mb-8"
+        >
+          Multi-model AI assistant with tools, memory, and reasoning
         </motion.p>
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full"
+        >
           {SUGGESTIONS.map((s) => (
             <motion.button
               key={s.text}
               onClick={() => onSuggestionClick(s.text)}
-              className="group flex items-start gap-3 p-3.5 rounded-xl border border-border/60 bg-card/50 hover:bg-card hover:border-border hover:shadow-sm transition-all duration-200 text-left"
-              whileHover={{ y: -2 }}
+              className="group flex items-start gap-2.5 p-3 rounded-xl border border-border/50 bg-card/60 hover:bg-card hover:border-border hover:shadow-sm transition-colors text-left"
+              whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
             >
-              <div className={cn('p-2 rounded-lg shrink-0', s.bg)}>
-                <s.icon className={cn('size-4', s.color)} />
+              <div className={cn('p-1.5 rounded-lg shrink-0', s.bg)}>
+                <s.icon className={cn('size-3.5', s.color)} />
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground leading-snug">{s.text}</p>
-              </div>
+              <p className="text-xs font-medium text-foreground leading-snug">{s.text}</p>
             </motion.button>
           ))}
         </motion.div>
@@ -348,17 +376,22 @@ function SessionList({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-3 space-y-3">
+      <div className="p-3 space-y-2.5">
         <Button onClick={onNew} className="w-full gap-2" size="sm">
-          <Plus className="size-4" />
+          <Plus className="size-3.5" />
           New Chat
         </Button>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <Input placeholder="Search sessions..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
+          <Input
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-8 h-8 text-xs"
+          />
         </div>
       </div>
-      <ScrollArea className="flex-1">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-2 pb-2 space-y-0.5">
           {filtered.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-8">No sessions yet</p>
@@ -368,40 +401,52 @@ function SessionList({
               key={session.id}
               onClick={() => onSelect(session.id)}
               className={cn(
-                'group w-full text-left px-3 py-2.5 rounded-lg transition-colors',
-                activeId === session.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                'group w-full text-left px-2.5 py-2 rounded-lg transition-colors',
+                activeId === session.id
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
               )}
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium truncate">{session.title}</p>
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-xs font-medium truncate">{session.title}</p>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-5 opacity-0 group-hover:opacity-100 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <MoreHorizontal className="size-3" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-36">
-                    <DropdownMenuItem className="text-destructive text-xs gap-2" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id, title: session.title }); }}>
+                  <DropdownMenuContent align="end" className="w-32">
+                    <DropdownMenuItem
+                      className="text-destructive text-xs gap-1.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget({ id: session.id, title: session.title });
+                      }}
+                    >
                       <Trash2 className="size-3" /> Delete
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
-                  {session.model ? getModelName(session.model) : 'Llama 3.3 70B'}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Badge variant="secondary" className="text-[9px] px-1 py-0 font-normal leading-tight">
+                  {session.model ? getModelName(session.model) : 'Llama 3.3'}
                 </Badge>
-                <span className="text-[10px] text-muted-foreground">{session.messageCount} msgs</span>
-                <span className="text-[10px] text-muted-foreground ml-auto">
-                  {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}
+                <span className="text-[9px] text-muted-foreground/70">{session.messageCount} msg</span>
+                <span className="text-[9px] text-muted-foreground/50 ml-auto truncate max-w-[60px]">
+                  {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}
                 </span>
               </div>
             </button>
           ))}
         </div>
-      </ScrollArea>
+      </div>
 
-      {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -417,7 +462,7 @@ function SessionList({
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting ? <Loader2 className="size-4 animate-spin mr-1" /> : <Trash2 className="size-4 mr-1" />}
+              {deleting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Trash2 className="size-3.5 mr-1" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -434,9 +479,7 @@ function SessionList({
 function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedModel: string; onSelectModel: (model: string) => void; disabled?: boolean }) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-
   const selectedName = getModelName(selectedModel);
-  const selectedProvider = getModelProvider(selectedModel);
 
   const filteredGroups = MODEL_GROUPS.map((group) => ({
     ...group,
@@ -452,14 +495,14 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="gap-1.5 text-xs font-normal px-2.5 py-1 h-7 max-w-[200px]"
+          className="gap-1.5 text-xs font-normal px-2 h-7 max-w-[180px] text-muted-foreground hover:text-foreground"
           disabled={disabled}
         >
-          <Cpu className="size-3 shrink-0 text-muted-foreground" />
+          <Cpu className="size-3 shrink-0" />
           <span className="truncate">{selectedName}</span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground ml-0.5" />
+          <ChevronDown className="size-2.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0" align="start">
@@ -474,7 +517,7 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
             />
           </div>
         </div>
-        <ScrollArea className="max-h-72">
+        <ScrollArea className="max-h-64">
           <div className="p-1">
             {filteredGroups.map((group) => (
               <div key={group.provider}>
@@ -498,11 +541,6 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
                       )}
                     >
                       <span className="font-medium truncate">{model.name}</span>
-                      {model.description && (
-                        <span className="text-muted-foreground truncate text-[10px] ml-auto">
-                          {model.description}
-                        </span>
-                      )}
                       {isSelected && <Check className="size-3 shrink-0 text-primary ml-auto" />}
                     </button>
                   );
@@ -516,6 +554,54 @@ function ModelSelector({ selectedModel, onSelectModel, disabled }: { selectedMod
         </ScrollArea>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/* ═════════════════════════════════════════════════════
+   SCROLL-TO-BOTTOM FAB
+   ═════════════════════════════════════════════════════ */
+
+function ScrollToBottom({ onClick }: { onClick: () => void }) {
+  const [visible, setVisible] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // Find the scrollable messages container (sibling of this component)
+    const container = scrollRef.current?.parentElement;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      setVisible(scrollHeight - scrollTop - clientHeight > 100);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  return (
+    <div ref={scrollRef}>
+      <AnimatePresence>
+        {visible && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.15 }}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10"
+          >
+            <Button
+              variant="secondary"
+              size="icon"
+              className="size-8 rounded-full shadow-md border border-border/60"
+              onClick={onClick}
+            >
+              <ArrowDown className="size-3.5" />
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -541,8 +627,10 @@ export function ChatView() {
   const [input, setInput] = useState('');
   const [loadingSession, setLoadingSession] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const isAutoScrollRef = useRef(true);
 
   // ── Initialize selected model if default ──
   useEffect(() => {
@@ -574,10 +662,31 @@ export function ChatView() {
     fetchSessions();
   }, [fetchSessions]);
 
-  // ── Auto-scroll ──
+  // ── Auto-scroll to bottom ──
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+    if (isAutoScrollRef.current) {
+      scrollToBottom();
+    }
+  }, [chatMessages, scrollToBottom]);
+
+  // ── Detect user manual scroll to pause auto-scroll ──
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      // If user scrolled up more than 60px from bottom, pause auto-scroll
+      isAutoScrollRef.current = scrollHeight - scrollTop - clientHeight < 60;
+    };
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // ── Auto-resize textarea ──
   useEffect(() => {
@@ -599,7 +708,6 @@ export function ChatView() {
       clearMessages();
       setCurrentSessionId(id);
 
-      // Load messages into store
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       for (const m of msgs) {
         addChatMessage({
@@ -613,16 +721,21 @@ export function ChatView() {
         });
       }
 
-      // Set model from session
       if (data.model && data.model !== 'hermes-agent') {
         setSelectedModel(data.model);
       }
+
+      // Scroll to bottom after loading messages
+      setTimeout(() => {
+        isAutoScrollRef.current = true;
+        scrollToBottom('instant');
+      }, 50);
     } catch (err) {
       console.error('Failed to load session:', err);
     } finally {
       setLoadingSession(false);
     }
-  }, [currentSessionId, loadingSession, clearMessages, setCurrentSessionId, addChatMessage, setSelectedModel]);
+  }, [currentSessionId, loadingSession, clearMessages, setCurrentSessionId, addChatMessage, setSelectedModel, scrollToBottom]);
 
   // ── Delete session ──
   const handleDeleteSession = useCallback(async (id: string, title: string) => {
@@ -633,7 +746,6 @@ export function ChatView() {
         clearMessages();
         setCurrentSessionId(null);
       }
-      // Toast is handled in SessionList component
     } catch (err) {
       console.error('Failed to delete session:', err);
       throw err;
@@ -646,6 +758,7 @@ export function ChatView() {
     if (!trimmed || isStreaming) return;
 
     setInput('');
+    isAutoScrollRef.current = true;
     addChatMessage({ id: `msg-${Date.now()}`, role: 'user', content: trimmed, createdAt: new Date() });
     addChatMessage({ id: `msg-${Date.now()}-resp`, role: 'assistant', content: '', isStreaming: true, createdAt: new Date() });
     setIsStreaming(true);
@@ -669,7 +782,6 @@ export function ChatView() {
         throw new Error(errData?.error || `Server error: ${response.status}`);
       }
 
-      // Read session ID from header
       const newSessionId = response.headers.get('X-Session-Id');
       if (newSessionId && newSessionId !== currentSessionId) {
         setCurrentSessionId(newSessionId);
@@ -753,9 +865,9 @@ export function ChatView() {
   const hasMessages = chatMessages.length > 0;
 
   return (
-    <div className="flex h-full">
+    <div className="absolute inset-0 flex">
       {/* ─── Left Panel: Session List ─── */}
-      <div className="hidden md:flex w-72 border-r border-border/60 bg-card/30 flex-col shrink-0">
+      <div className="hidden md:flex w-64 lg:w-72 border-r border-border/50 bg-card/20 flex-col shrink-0">
         <SessionList
           sessions={sessions}
           activeId={currentSessionId}
@@ -766,17 +878,17 @@ export function ChatView() {
       </div>
 
       {/* ─── Right Panel: Chat Area ─── */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {/* Header — fixed at top */}
+        <header className="shrink-0 border-b border-border/50 bg-background/90 backdrop-blur-sm px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 z-10">
+          <div className="flex items-center gap-2.5 min-w-0">
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="md:hidden size-8">
                   <MessageSquare className="size-4" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0">
+              <SheetContent side="left" className="w-64 p-0">
                 <SheetTitle className="sr-only">Sessions</SheetTitle>
                 <SessionList
                   sessions={sessions}
@@ -788,13 +900,13 @@ export function ChatView() {
               </SheetContent>
             </Sheet>
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold truncate">
-                {loadingSession ? 'Loading...' : hasMessages ? 'Chat' : 'New Chat'}
+              <h2 className="text-sm font-semibold truncate leading-tight">
+                {loadingSession ? 'Loading...' : currentSessionId ? 'Chat' : 'New Chat'}
               </h2>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">
                 {isStreaming ? (
                   <span className="flex items-center gap-1 text-primary">
-                    <Loader2 className="size-3 animate-spin" /> Generating...
+                    <Loader2 className="size-2.5 animate-spin" /> Generating...
                   </span>
                 ) : (
                   'Hermes Agent Ready'
@@ -803,20 +915,16 @@ export function ChatView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Model selector */}
+          <div className="flex items-center gap-1 shrink-0">
             <ModelSelector
               selectedModel={selectedModel || DEFAULT_MODEL}
               onSelectModel={handleModelSelect}
               disabled={isStreaming}
             />
-
-            <Separator orientation="vertical" className="h-5 mx-1" />
-
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8" onClick={handleNewChat}>
-                  <Plus className="size-4" />
+                <Button variant="ghost" size="icon" className="size-7" onClick={handleNewChat}>
+                  <Plus className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>New Chat</TooltipContent>
@@ -824,30 +932,33 @@ export function ChatView() {
           </div>
         </header>
 
-        {/* Messages Area — fixed height, scrolls internally */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+        {/* Messages Area — THIS is the scrollable part */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden min-h-0"
+          style={{ scrollBehavior: 'smooth' }}
+        >
           {!hasMessages ? (
             <WelcomeScreen onSuggestionClick={handleSuggestionClick} />
           ) : (
             <div className="py-4 max-w-3xl mx-auto">
-              <AnimatePresence mode="popLayout">
-                {chatMessages.map((msg) => (
-                  <MessageBubble key={msg.id} message={msg} />
-                ))}
-              </AnimatePresence>
-              <div ref={messagesEndRef} />
+              {chatMessages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+              <div ref={messagesEndRef} className="h-1" />
             </div>
           )}
+          <ScrollToBottom onClick={scrollToBottom} />
         </div>
 
-        {/* Input Area — always fixed at bottom */}
-        <div className="shrink-0 border-t border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3">
+        {/* Input Area — fixed at bottom */}
+        <div className="shrink-0 border-t border-border/50 bg-background/90 backdrop-blur-sm px-3 sm:px-4 py-3">
           <div className="max-w-3xl mx-auto">
-            <div className="relative flex items-end gap-2 rounded-2xl border border-border/60 bg-card p-2 focus-within:ring-2 focus-within:ring-ring/50 focus-within:border-border transition-all">
+            <div className="relative flex items-end gap-1.5 rounded-2xl border border-border/60 bg-card/80 p-1.5 focus-within:ring-2 focus-within:ring-ring/40 focus-within:border-border transition-all">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="size-8 rounded-xl text-muted-foreground hover:text-foreground shrink-0">
-                    <Paperclip className="size-4" />
+                    <Paperclip className="size-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Attach files</TooltipContent>
@@ -859,7 +970,7 @@ export function ChatView() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Message Hermes Agent..."
-                className="flex-1 min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
+                className="flex-1 min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent p-0 px-2 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
                 rows={1}
                 disabled={isStreaming}
               />
@@ -867,7 +978,7 @@ export function ChatView() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="size-8 rounded-xl text-muted-foreground hover:text-foreground shrink-0">
-                    <Mic className="size-4" />
+                    <Mic className="size-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Voice input</TooltipContent>
@@ -875,7 +986,7 @@ export function ChatView() {
 
               {isStreaming ? (
                 <Button size="icon" className="size-8 rounded-xl shrink-0" variant="destructive" onClick={handleStop}>
-                  <Square className="size-3.5" />
+                  <Square className="size-3" />
                 </Button>
               ) : (
                 <Button size="icon" className="size-8 rounded-xl shrink-0" onClick={handleSend} disabled={!input.trim()}>
@@ -883,8 +994,8 @@ export function ChatView() {
                 </Button>
               )}
             </div>
-            <p className="text-center text-[10px] text-muted-foreground/60 mt-2">
-              Hermes Agent — Web interface for your AI agent. Press Enter to send, Shift+Enter for new line.
+            <p className="text-center text-[10px] text-muted-foreground/40 mt-1.5 select-none">
+              Hermes Agent &middot; Enter to send, Shift+Enter for new line
             </p>
           </div>
         </div>
