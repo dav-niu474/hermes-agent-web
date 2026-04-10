@@ -1,84 +1,127 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
 
-const DEFAULT_HERMES_URL = "http://localhost:8642";
-const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_NVIDIA_KEY = "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";
+// Get hermes-agent connection config from DB (with env fallback)
+async function getHermesConfig() {
+  try {
+    const configs = await db.agentConfig.findMany();
+    const map: Record<string, string> = {};
+    for (const c of configs) map[c.key] = c.value;
+    return {
+      url: map.hermes_url || process.env.HERMES_URL || "http://localhost:8642",
+      apiKey: map.hermes_api_key || process.env.HERMES_API_KEY || "",
+    };
+  } catch {
+    return {
+      url: process.env.HERMES_URL || "http://localhost:8642",
+      apiKey: process.env.HERMES_API_KEY || "",
+    };
+  }
+}
 
 /**
  * GET /api/hermes
- * Check Hermes Agent health, NVIDIA API health, and configuration.
+ * Check hermes-agent health and list available models.
+ * Returns connection status, health data, model list, and current config.
  */
 export async function GET() {
   try {
-    const configs = await fetchAllConfigs();
-    const hermesUrl = configs.hermes_url || DEFAULT_HERMES_URL;
-    const nvidiaKey = configs.nvidia_api_key || DEFAULT_NVIDIA_KEY;
+    const config = await getHermesConfig();
+    const headers: Record<string, string> = {};
+    if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
 
-    // Run health checks in parallel
-    const [hermesResult, nvidiaResult] = await Promise.allSettled([
-      fetch(`${hermesUrl}/health`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
-      fetch(`${NVIDIA_API_URL}/models`, {
-        headers: { Authorization: `Bearer ${nvidiaKey}` },
+    // Health check + models in parallel
+    const [healthResult, modelsResult] = await Promise.allSettled([
+      fetch(`${config.url}/health`, {
+        headers,
+        signal: AbortSignal.timeout(5000),
+      }).then((r) => r.json()),
+      fetch(`${config.url}/v1/models`, {
+        headers,
         signal: AbortSignal.timeout(8000),
       }).then((r) => r.json()),
     ]);
 
-    // Hermes status
-    let hermesStatus: "connected" | "disconnected" | "error" = "disconnected";
-    let hermesHealth: unknown = null;
+    let healthStatus: "connected" | "disconnected" | "error" = "disconnected";
+    let healthData: unknown = null;
 
-    if (hermesResult.status === "fulfilled") {
-      hermesStatus = "connected";
-      hermesHealth = hermesResult.value;
-    } else if (hermesResult.status === "rejected") {
-      const reason = hermesResult.reason;
-      hermesStatus = reason?.name === "TimeoutError" || reason?.name === "AbortError" ? "disconnected" : "error";
+    if (healthResult.status === "fulfilled" && healthResult.value?.status === "ok") {
+      healthStatus = "connected";
+      healthData = healthResult.value;
+    } else if (healthResult.status === "rejected") {
+      healthStatus = "error";
     }
 
-    // NVIDIA status
-    let nvidiaStatus: "connected" | "disconnected" | "error" = "disconnected";
-    let nvidiaModels: string[] = [];
-
-    if (nvidiaResult.status === "fulfilled" && nvidiaResult.value?.data) {
-      nvidiaStatus = "connected";
-      // Extract model IDs
-      nvidiaModels = nvidiaResult.value.data.map((m: { id: string }) => m.id);
-    } else if (nvidiaResult.status === "rejected") {
-      nvidiaStatus = "error";
+    let models: { id: string; owned_by: string }[] = [];
+    if (modelsResult.status === "fulfilled" && modelsResult.value?.data) {
+      models = modelsResult.value.data.map(
+        (m: { id: string; owned_by?: string }) => ({
+          id: m.id,
+          owned_by: m.owned_by || "hermes",
+        }),
+      );
     }
-
-    // Determine overall status
-    const overallStatus = nvidiaStatus === "connected" ? "connected" : hermesStatus;
 
     return NextResponse.json({
-      status: overallStatus,
-      hermes: { status: hermesStatus, url: hermesUrl, health: hermesHealth },
-      nvidia: { status: nvidiaStatus, models: nvidiaModels },
-      config: configs,
+      status: healthStatus,
+      health: healthData,
+      models,
+      config: { url: config.url, hasApiKey: !!config.apiKey },
     });
   } catch (error) {
-    console.error("[Hermes API] GET error:", error);
+    console.error("[Hermes API] Error:", error);
     return NextResponse.json({
       status: "error",
-      hermes: { status: "error", url: DEFAULT_HERMES_URL, health: null },
-      nvidia: { status: "disconnected", models: [] },
-      config: {},
-      error: "Failed to check status",
+      health: null,
+      models: [],
+      config: { url: "", hasApiKey: false },
+      error: "Failed to connect to Hermes Agent",
     });
   }
 }
 
-/** Fetch all AgentConfig entries as a key-value map */
-async function fetchAllConfigs(): Promise<Record<string, string>> {
+/**
+ * PUT /api/hermes
+ * Update hermes-agent connection config in the database.
+ */
+export async function PUT(request: Request) {
   try {
-    const { db } = await import("@/lib/db");
-    const configs = await db.agentConfig.findMany();
-    const map: Record<string, string> = {};
-    for (const c of configs) {
-      map[c.key] = c.value;
+    const body = await request.json();
+    const { hermes_url, hermes_api_key } = body;
+
+    if (hermes_url !== undefined) {
+      await db.agentConfig.upsert({
+        where: { key: "hermes_url" },
+        update: { value: String(hermes_url) },
+        create: {
+          key: "hermes_url",
+          value: String(hermes_url),
+          label: "Hermes Agent URL",
+          group: "hermes",
+        },
+      });
     }
-    return map;
-  } catch {
-    return {};
+
+    if (hermes_api_key !== undefined) {
+      await db.agentConfig.upsert({
+        where: { key: "hermes_api_key" },
+        update: { value: String(hermes_api_key) },
+        create: {
+          key: "hermes_api_key",
+          value: String(hermes_api_key),
+          label: "Hermes API Key",
+          group: "hermes",
+          type: "secret",
+        },
+      });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[Hermes API] PUT error:", error);
+    return NextResponse.json(
+      { error: "Failed to save config" },
+      { status: 503 },
+    );
   }
 }

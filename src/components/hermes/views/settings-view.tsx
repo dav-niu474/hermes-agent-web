@@ -48,10 +48,11 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export function SettingsView() {
-  const { hermesUrl, setHermesUrl, agentStatus } = useAppStore();
+  const { hermesUrl, setHermesUrl, hermesApiKey, setHermesApiKey, hermesModels, setHermesModels, agentStatus } = useAppStore();
   const [urlInput, setUrlInput] = useState(hermesUrl);
+  const [apiKeyInput, setApiKeyInput] = useState(hermesApiKey);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [apiKey, setApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const [generalSettings, setGeneralSettings] = useState({
     sessionResetMode: 'both',
@@ -60,11 +61,11 @@ export function SettingsView() {
   });
 
   const [modelSettings, setModelSettings] = useState({
-    defaultModel: 'glm-5-plus',
-    smartRouting: true,
+    defaultModel: 'hermes-agent',
+    smartRouting: false,
     maxSimpleChars: 160,
-    cheapModel: 'nvidia/deepseek-llama3.1-8b-instruct',
-    compressionModel: 'nvidia/deepseek-llama3.1-8b-instruct',
+    cheapModel: '',
+    compressionModel: '',
   });
 
   const [terminalSettings, setTerminalSettings] = useState({
@@ -92,13 +93,56 @@ export function SettingsView() {
     delegationMaxIterations: 50,
   });
 
-  const handleSaveSection = (name: string) => {
-    toast.success(`${name} settings saved`);
+  const handleSaveSection = async (name: string) => {
+    setSaving(true);
+    try {
+      await fetch('/api/hermes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hermes_url: urlInput, hermes_api_key: apiKeyInput }),
+      });
+      setHermesUrl(urlInput);
+      setHermesApiKey(apiKeyInput);
+      toast.success(`${name} settings saved`);
+    } catch {
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTestConnection = async () => {
     toast('Testing connection...');
-    setHermesUrl(urlInput);
+    try {
+      await fetch('/api/hermes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hermes_url: urlInput, hermes_api_key: apiKeyInput }),
+      });
+      setHermesUrl(urlInput);
+      setHermesApiKey(apiKeyInput);
+    } catch { /* ignore */ }
+    const res = await fetch('/api/hermes');
+    const data = await res.json();
+    if (data.status === 'connected') {
+      toast.success('Connected to Hermes Agent!');
+      if (data.models) setHermesModels(data.models);
+    } else {
+      toast.error(`Connection failed: ${data.error || 'Agent not reachable'}`);
+    }
+  };
+
+  const handleRefreshModels = async () => {
+    try {
+      const res = await fetch('/api/hermes');
+      const data = await res.json();
+      if (data.models) {
+        setHermesModels(data.models);
+        toast.success(`Loaded ${data.models.length} models from agent`);
+      }
+    } catch {
+      toast.error('Failed to fetch models');
+    }
   };
 
   return (
@@ -163,18 +207,19 @@ export function SettingsView() {
                     <Separator />
 
                     <div className="space-y-2">
-                      <Label htmlFor="nvidia-key" className="flex items-center gap-2">
-                        <Zap className="size-3.5 text-amber-500" /> NVIDIA API Key
+                      <Label htmlFor="api-key" className="flex items-center gap-2">
+                        <Shield className="size-3.5 text-primary" /> Hermes API Key
                       </Label>
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                        Powered by <span className="font-medium text-foreground">NVIDIA NIM</span> — Enterprise-grade AI inference
+                      <p className="text-[11px] text-muted-foreground">
+                        Bearer token for Hermes Agent authentication (optional, set via API_SERVER_KEY)
                       </p>
                       <div className="relative">
                         <Input
-                          id="nvidia-key"
+                          id="api-key"
                           type={showApiKey ? 'text' : 'password'}
-                          placeholder="nvapi-..."
-                          onChange={(e) => setApiKey(e.target.value)}
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          placeholder="Your API server key"
                           className="pr-10 font-mono text-xs"
                         />
                         <Button
@@ -188,33 +233,9 @@ export function SettingsView() {
                       </div>
                     </div>
 
-                    <Separator />
-
-                    <div className="space-y-2">
-                      <Label htmlFor="api-key">Hermes API Key (optional)</Label>
-                      <div className="relative">
-                        <Input
-                          id="api-key"
-                          type={showApiKey ? 'text' : 'password'}
-                          value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder="Bearer token for authentication"
-                          className="pr-10"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-0 top-0 size-9"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                        >
-                          {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                        </Button>
-                      </div>
-                    </div>
-
                     <div className="flex justify-end">
-                      <Button size="sm" onClick={() => handleSaveSection('General')} className="gap-1.5">
-                        <Save className="size-3.5" /> Save
+                      <Button size="sm" onClick={() => handleSaveSection('Connection')} disabled={saving} className="gap-1.5">
+                        <Save className="size-3.5" /> Save & Connect
                       </Button>
                     </div>
                   </CardContent>
@@ -270,65 +291,54 @@ export function SettingsView() {
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Bot className="size-4" /> Model Configuration
+                      <Bot className="size-4" /> Agent Model
                     </CardTitle>
+                    <CardDescription>Model configuration is managed by Hermes Agent. The agent selects the best LLM for each task.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Default Model</Label>
-                      <Select value={modelSettings.defaultModel} onValueChange={(v) => setModelSettings({ ...modelSettings, defaultModel: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="glm-4-plus">GLM 4.7 (Zhipu AI)</SelectItem>
-                          <SelectItem value="glm-4-plus-thinking">GLM 4.7 Thinking</SelectItem>
-                          <SelectItem value="glm-5-plus">GLM 5 (Zhipu AI)</SelectItem>
-                          <SelectItem value="moonshot-v1-128k">Kimi 2.5 (128K)</SelectItem>
-                          <SelectItem value="nvidia/llama-3.1-nemotron-70b-instruct">Nemotron 70B (NVIDIA)</SelectItem>
-                          <SelectItem value="nvidia/llama-3.1-nemotron-ultra-253b">Nemotron Ultra 253B (NVIDIA)</SelectItem>
-                          <SelectItem value="meta/llama-3.1-405b-instruct">Llama 3.1 405B (Meta)</SelectItem>
-                          <SelectItem value="nvidia/nemotron-4-340b-instruct">Nemotron 4 340B (NVIDIA)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Smart Model Routing</Label>
-                        <p className="text-xs text-muted-foreground">Use cheaper models for simple queries</p>
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <Cpu className="size-4 text-primary" />
                       </div>
-                      <Switch checked={modelSettings.smartRouting} onCheckedChange={(v) => setModelSettings({ ...modelSettings, smartRouting: v })} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">Hermes Agent</p>
+                        <p className="text-xs text-muted-foreground">Autonomous AI agent with 40+ built-in tools</p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0">Active</Badge>
                     </div>
-                    {modelSettings.smartRouting && (
-                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-3 pl-4 border-l-2 border-border/50">
-                        <div className="space-y-2">
-                          <Label className="text-xs">Cheap Model</Label>
-                          <Select value={modelSettings.cheapModel} onValueChange={(v) => setModelSettings({ ...modelSettings, cheapModel: v })}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="nvidia/deepseek-llama3.1-8b-instruct">DeepSeek Llama 8B (NVIDIA)</SelectItem>
-                              <SelectItem value="mistralai/mixtral-8x22b-instruct-v0.1">Mixtral 8x22B (Mistral)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs">Max Simple Chars: {modelSettings.maxSimpleChars}</Label>
-                          <Slider value={[modelSettings.maxSimpleChars]} onValueChange={([v]) => setModelSettings({ ...modelSettings, maxSimpleChars: v })} min={50} max={500} step={10} />
-                        </div>
-                      </motion.div>
-                    )}
+
                     <Separator />
+
                     <div className="space-y-2">
-                      <Label>Compression Model (for context summarization)</Label>
-                      <Select value={modelSettings.compressionModel} onValueChange={(v) => setModelSettings({ ...modelSettings, compressionModel: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="nvidia/deepseek-llama3.1-8b-instruct">DeepSeek Llama 8B (NVIDIA)</SelectItem>
-                          <SelectItem value="mistralai/mixtral-8x22b-instruct-v0.1">Mixtral 8x22B (Mistral)</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-center justify-between">
+                        <Label>Available Models from Agent</Label>
+                        <Button variant="ghost" size="sm" onClick={handleRefreshModels} className="gap-1 text-xs h-7">
+                          <RefreshCw className="size-3" /> Refresh
+                        </Button>
+                      </div>
+                      {hermesModels.length > 0 ? (
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+                          {hermesModels.map((m) => (
+                            <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border/40">
+                              <div className="flex items-center gap-2">
+                                <div className="size-2 rounded-full bg-emerald-500" />
+                                <span className="text-sm font-mono">{m.id}</span>
+                              </div>
+                              <Badge variant="secondary" className="text-[10px]">{m.owned_by}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground py-4 text-center">No models loaded. Click Refresh to fetch from agent.</p>
+                      )}
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" className="gap-1.5"><RotateCcw className="size-3" /> Reset</Button>
-                      <Button size="sm" onClick={() => handleSaveSection('Model')} className="gap-1.5"><Save className="size-3.5" /> Save</Button>
+
+                    <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Note:</span> The Hermes Agent handles model selection internally. 
+                        Configure the default model in your hermes-agent CLI config (<code className="text-[10px] bg-muted px-1 py-0.5 rounded">~/.hermes/.env</code>). 
+                        This web interface sends all requests to the agent, which routes them to the appropriate LLM.
+                      </p>
                     </div>
                   </CardContent>
                 </Card>

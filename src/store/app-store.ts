@@ -45,6 +45,11 @@ interface AppState {
   availableModels: string[];
   setAvailableModels: (models: string[]) => void;
 
+  hermesApiKey: string;
+  setHermesApiKey: (key: string) => void;
+  hermesModels: { id: string; owned_by: string }[];
+  setHermesModels: (models: { id: string; owned_by: string }[]) => void;
+
   settings: Record<string, string>;
   updateSetting: (key: string, value: string) => void;
 }
@@ -91,10 +96,15 @@ export const useAppStore = create<AppState>((set) => ({
   hermesUrl: 'http://localhost:8642',
   setHermesUrl: (url) => set({ hermesUrl: url }),
 
-  selectedModel: 'z-ai/glm5',
+  selectedModel: 'hermes-agent',
   setSelectedModel: (model) => set({ selectedModel: model }),
   availableModels: [],
   setAvailableModels: (models) => set({ availableModels: models }),
+
+  hermesApiKey: '',
+  setHermesApiKey: (key) => set({ hermesApiKey: key }),
+  hermesModels: [] as { id: string; owned_by: string }[],
+  setHermesModels: (models) => set({ hermesModels: models }),
 
   settings: {},
   updateSetting: (key, value) =>

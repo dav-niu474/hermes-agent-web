@@ -39,15 +39,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -56,30 +47,6 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/s
 import { useAppStore, type ChatMessage } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
-
-/* ═════════════════════════════════════════════════════
-   MODEL LIST
-   ═════════════════════════════════════════════════════ */
-
-const MODEL_GROUPS = [
-  {
-    label: '⭐ 常用推荐',
-    models: [
-      { id: 'z-ai/glm5', name: 'GLM 5 ⭐' },
-      { id: 'z-ai/glm4.7', name: 'GLM 4.7 Thinking' },
-      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B' },
-    ],
-  },
-  {
-    label: 'NVIDIA 系列',
-    models: [
-      { id: 'nvidia/llama-3.1-nemotron-ultra-253b', name: 'Nemotron Ultra 253B' },
-      { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B' },
-      { id: 'nvidia/deepseek-llama3.1-8b-instruct', name: 'DeepSeek Llama 8B' },
-      { id: 'nvidia/nemotron-4-340b-instruct', name: 'Nemotron 4 340B' },
-    ],
-  },
-];
 
 const SUGGESTIONS = [
   { text: 'Search the web for the latest AI news', icon: Globe, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
@@ -332,8 +299,6 @@ export function ChatView() {
     setIsStreaming,
     currentSessionId,
     setCurrentSessionId,
-    selectedModel,
-    setSelectedModel,
     clearMessages,
   } = useAppStore();
 
@@ -391,7 +356,6 @@ export function ChatView() {
 
       clearMessages();
       setCurrentSessionId(id);
-      if (data.model) setSelectedModel(data.model);
 
       // Load messages into store
       const msgs = Array.isArray(data.messages) ? data.messages : [];
@@ -411,7 +375,7 @@ export function ChatView() {
     } finally {
       setLoadingSession(false);
     }
-  }, [currentSessionId, loadingSession, clearMessages, setCurrentSessionId, setSelectedModel, addChatMessage]);
+  }, [currentSessionId, loadingSession, clearMessages, setCurrentSessionId, addChatMessage]);
 
   // ── Delete session ──
   const handleDeleteSession = useCallback(async (id: string) => {
@@ -445,7 +409,6 @@ export function ChatView() {
         body: JSON.stringify({
           messages: [...chatMessages, { role: 'user', content: trimmed }].map((m) => ({ role: m.role, content: m.content })),
           sessionId: currentSessionId || undefined,
-          model: selectedModel,
           stream: true,
         }),
       });
@@ -505,7 +468,7 @@ export function ChatView() {
     } finally {
       setIsStreaming(false);
     }
-  }, [input, isStreaming, chatMessages, currentSessionId, selectedModel, addChatMessage, updateLastAssistantMessage, setIsStreaming, setCurrentSessionId, fetchSessions]);
+  }, [input, isStreaming, chatMessages, currentSessionId, addChatMessage, updateLastAssistantMessage, setIsStreaming, setCurrentSessionId, fetchSessions]);
 
   const handleStop = () => {
     abortRef.current?.abort();
@@ -571,22 +534,9 @@ export function ChatView() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Model selector with groups */}
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="h-8 w-auto min-w-[160px] text-xs">
-                <SelectValue placeholder="Model" />
-              </SelectTrigger>
-              <SelectContent>
-                {MODEL_GROUPS.map((group) => (
-                  <SelectGroup key={group.label}>
-                    <SelectLabel className="text-xs font-semibold text-muted-foreground">{group.label}</SelectLabel>
-                    {group.models.map((m) => (
-                      <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
+            <Badge variant="outline" className="gap-1.5 text-xs font-normal px-2.5 py-1">
+              <Bot className="size-3" /> Hermes Agent
+            </Badge>
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -659,7 +609,7 @@ export function ChatView() {
               )}
             </div>
             <p className="text-center text-[10px] text-muted-foreground/60 mt-2">
-              Hermes Agent — GLM 5 · Kimi 2.5 · NVIDIA Nemotron. Press Enter to send, Shift+Enter for new line.
+              Hermes Agent — Web interface for your AI agent. Press Enter to send, Shift+Enter for new line.
             </p>
           </div>
         </div>
