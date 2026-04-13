@@ -598,21 +598,25 @@ function SidebarContent({
 
       <Separator />
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 space-y-0.5">
-        {navItems.map((item) => (
-          <SidebarNavItem
-            key={item.id}
-            item={item}
-            isActive={currentView === item.id}
-            collapsed={collapsed}
-            onSelect={handleSelect}
-          />
-        ))}
-      </nav>
+      {/* Navigation + Chat History (scrollable as one unit) */}
+      <nav className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 space-y-0.5 flex flex-col">
+        <div className="space-y-0.5">
+          {navItems.map((item) => (
+            <SidebarNavItem
+              key={item.id}
+              item={item}
+              isActive={currentView === item.id}
+              collapsed={collapsed}
+              onSelect={handleSelect}
+            />
+          ))}
+        </div>
 
-      {/* Chat History — New Chat + Recent Sessions (directly below nav) */}
-      <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
+        {/* Chat History — New Chat + Recent Sessions, pushed to bottom within nav */}
+        <div className="mt-auto pt-3">
+          <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
+        </div>
+      </nav>
 
       <Separator />
 
