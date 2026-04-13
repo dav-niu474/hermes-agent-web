@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock,
@@ -9,12 +9,10 @@ import {
   Play,
   Pause,
   MoreHorizontal,
-  Calendar,
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Repeat,
-  Zap,
+  RefreshCw,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -24,7 +22,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -65,16 +62,24 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 interface CronJob {
   id: string;
   name: string;
   schedule: string;
   task: string;
   isEnabled: boolean;
-  lastRunAt: Date | null;
-  nextRunAt: Date | null;
-  status: 'active' | 'paused' | 'error';
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
 }
+
+type JobStatus = 'active' | 'paused' | 'error';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const SCHEDULE_PRESETS = [
   { label: 'Every hour', value: '0 * * * *' },
@@ -101,67 +106,210 @@ function humanReadableCron(cron: string): string {
   return readable;
 }
 
-const INITIAL_JOBS: CronJob[] = [
-  { id: 'c1', name: 'Daily News Summary', schedule: '0 9 * * *', task: 'Search for and summarize the latest AI/ML news from the past 24 hours. Provide a structured summary with key developments, new releases, and notable papers.', isEnabled: true, lastRunAt: new Date('2025-01-15T09:00:00'), nextRunAt: new Date('2025-01-16T09:00:00'), status: 'active' },
-  { id: 'c2', name: 'Weekly Code Review', schedule: '0 10 * * 1', task: 'Review all code changes in the past week from the repository. Generate a summary of changes, potential issues, and improvement suggestions.', isEnabled: true, lastRunAt: new Date('2025-01-13T10:00:00'), nextRunAt: new Date('2025-01-20T10:00:00'), status: 'active' },
-  { id: 'c3', name: 'Health Check', schedule: '0 */6 * * *', task: 'Check the health of all running services and databases. Report any issues or degraded performance.', isEnabled: true, lastRunAt: new Date('2025-01-15T06:00:00'), nextRunAt: new Date('2025-01-15T12:00:00'), status: 'active' },
-  { id: 'c4', name: 'Backup Verification', schedule: '0 2 * * *', task: 'Verify that the latest database backups are valid and can be restored. Report backup status and storage usage.', isEnabled: true, lastRunAt: new Date('2025-01-15T02:00:00'), nextRunAt: new Date('2025-01-16T02:00:00'), status: 'active' },
-  { id: 'c5', name: 'Log Analysis', schedule: '0 8 * * 1-5', task: 'Analyze application logs from the previous day. Identify errors, warnings, and performance anomalies.', isEnabled: false, lastRunAt: new Date('2025-01-10T08:00:00'), nextRunAt: null, status: 'paused' },
-  { id: 'c6', name: 'Dependency Updates', schedule: '0 10 * * 1', task: 'Check for available updates to project dependencies. Generate a report with version changes and potential breaking changes.', isEnabled: false, lastRunAt: null, nextRunAt: null, status: 'paused' },
-];
+const STATUS_CONFIG: Record<JobStatus, { icon: typeof CheckCircle2; color: string; bg: string; badgeClass: string }> = {
+  active: {
+    icon: CheckCircle2,
+    color: 'text-emerald-500',
+    bg: 'bg-emerald-500/10',
+    badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400',
+  },
+  paused: {
+    icon: Pause,
+    color: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+    badgeClass: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-500/10 dark:text-amber-400',
+  },
+  error: {
+    icon: AlertCircle,
+    color: 'text-red-500',
+    bg: 'bg-red-500/10',
+    badgeClass: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400',
+  },
+};
+
+function deriveStatus(job: CronJob): JobStatus {
+  if (job.status === 'error') return 'error';
+  return job.isEnabled ? 'active' : 'paused';
+}
+
+function formatDate(dateStr: string | null): string | null {
+  if (!dateStr) return null;
+  try {
+    return format(new Date(dateStr), 'MMM d, HH:mm');
+  } catch {
+    return null;
+  }
+}
+
+// ─── Skeleton Loader ─────────────────────────────────────────────────────────
+
+function JobCardSkeleton() {
+  return (
+    <Card className="border-border/40">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-4">
+          <div className="p-2 rounded-lg bg-muted/60 shrink-0 mt-0.5">
+            <Loader2 className="size-4 text-muted-foreground/40 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-32 rounded bg-muted/60 animate-pulse" />
+              <div className="h-4 w-12 rounded-full bg-muted/40 animate-pulse" />
+            </div>
+            <div className="h-3 w-full rounded bg-muted/40 animate-pulse" />
+            <div className="h-3 w-3/4 rounded bg-muted/30 animate-pulse" />
+            <div className="flex items-center gap-3 pt-1">
+              <div className="h-3 w-28 rounded bg-muted/40 animate-pulse" />
+              <div className="h-3 w-20 rounded bg-muted/30 animate-pulse" />
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <div className="size-8 rounded bg-muted/30 animate-pulse" />
+            <div className="size-8 rounded bg-muted/30 animate-pulse" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 export function CronjobsView() {
-  const [jobs, setJobs] = useState<CronJob[]>(INITIAL_JOBS);
+  const [jobs, setJobs] = useState<CronJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
   const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSchedule, setNewSchedule] = useState('0 9 * * *');
   const [newTask, setNewTask] = useState('');
   const [newEnabled, setNewEnabled] = useState(true);
 
-  const activeCount = jobs.filter(j => j.isEnabled).length;
+  // ── Fetch jobs ──
 
-  const handleToggle = (id: string) => {
-    setJobs(prev => prev.map(j => {
-      if (j.id !== id) return j;
-      const enabled = !j.isEnabled;
-      return { ...j, isEnabled: enabled, status: enabled ? 'active' : 'paused' };
-    }));
-  };
+  const fetchJobs = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
 
-  const handleCreate = () => {
+    try {
+      const res = await fetch('/api/cronjobs');
+      if (!res.ok) throw new Error(`Failed to fetch jobs (${res.status})`);
+      const data: CronJob[] = await res.json();
+      setJobs(data);
+    } catch (err) {
+      console.error('[CronjobsView] fetch error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load cron jobs');
+      toast.error('Failed to load cron jobs');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchJobs();
+  }, [fetchJobs]);
+
+  // ── Toggle job ──
+
+  const handleToggle = useCallback(async (job: CronJob) => {
+    const newEnabled = !job.isEnabled;
+    const optimisticJobs = jobs.map(j =>
+      j.id === job.id ? { ...j, isEnabled: newEnabled, status: newEnabled ? 'active' : 'paused' } : j,
+    );
+    setJobs(optimisticJobs);
+
+    try {
+      const res = await fetch('/api/cronjobs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id, isEnabled: newEnabled }),
+      });
+      if (!res.ok) throw new Error(`Failed to update job (${res.status})`);
+      const updated: CronJob = await res.json();
+      setJobs(prev => prev.map(j => j.id === updated.id ? updated : j));
+      toast.success(newEnabled ? `"${job.name}" enabled` : `"${job.name}" paused`);
+    } catch (err) {
+      console.error('[CronjobsView] toggle error:', err);
+      setJobs(jobs); // rollback
+      toast.error('Failed to update job');
+    }
+  }, [jobs]);
+
+  // ── Create job ──
+
+  const handleCreate = useCallback(async () => {
     if (!newName.trim() || !newTask.trim()) {
       toast.error('Please fill in name and task');
       return;
     }
-    const job: CronJob = {
-      id: `c-${Date.now()}`,
-      name: newName.trim(),
-      schedule: newSchedule,
-      task: newTask.trim(),
-      isEnabled: newEnabled,
-      lastRunAt: null,
-      nextRunAt: newEnabled ? new Date(Date.now() + 3600000) : null,
-      status: newEnabled ? 'active' : 'paused',
-    };
-    setJobs(prev => [job, ...prev]);
-    setCreateOpen(false);
-    setNewName('');
-    setNewSchedule('0 9 * * *');
-    setNewTask('');
-    setNewEnabled(true);
-    toast.success(`Cron job "${job.name}" created`);
-  };
 
-  const handleDelete = (id: string) => {
-    setJobs(prev => prev.filter(j => j.id !== id));
-    setDeleteId(null);
-    toast.success('Cron job deleted');
-  };
+    setCreating(true);
+    try {
+      const res = await fetch('/api/cronjobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newName.trim(),
+          schedule: newSchedule,
+          task: newTask.trim(),
+          isEnabled: newEnabled,
+        }),
+      });
+      if (!res.ok) throw new Error(`Failed to create job (${res.status})`);
+      const created: CronJob = await res.json();
+      setJobs(prev => [created, ...prev]);
+      setCreateOpen(false);
+      setNewName('');
+      setNewSchedule('0 9 * * *');
+      setNewTask('');
+      setNewEnabled(true);
+      toast.success(`Cron job "${created.name}" created`);
+    } catch (err) {
+      console.error('[CronjobsView] create error:', err);
+      toast.error('Failed to create cron job');
+    } finally {
+      setCreating(false);
+    }
+  }, [newName, newSchedule, newTask, newEnabled]);
 
-  const handleRunNow = (name: string) => {
-    toast(`Running "${name}" now...`);
-  };
+  // ── Delete job ──
+
+  const handleDelete = useCallback(async (id: string) => {
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/cronjobs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error(`Failed to delete job (${res.status})`);
+      setJobs(prev => prev.filter(j => j.id !== id));
+      setDeleteId(null);
+      toast.success('Cron job deleted');
+    } catch (err) {
+      console.error('[CronjobsView] delete error:', err);
+      toast.error('Failed to delete cron job');
+    } finally {
+      setDeleting(false);
+    }
+  }, []);
+
+  // ── Run now ──
+
+  const handleRunNow = useCallback((name: string) => {
+    toast.info(`Triggering "${name}"...`);
+  }, []);
+
+  // ── Derived state ──
+
+  const activeCount = jobs.filter(j => j.isEnabled).length;
 
   return (
     <div className="flex flex-col h-full">
@@ -171,116 +319,172 @@ export function CronjobsView() {
           <div>
             <h1 className="text-xl font-bold tracking-tight">Cron Jobs</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {jobs.length} jobs &middot; <span className="text-emerald-600 dark:text-emerald-400 font-medium">{activeCount} active</span>
+              {loading ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="size-3 animate-spin" />
+                  Loading…
+                </span>
+              ) : (
+                <>
+                  {jobs.length} job{jobs.length !== 1 ? 's' : ''} &middot;{' '}
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">{activeCount} active</span>
+                </>
+              )}
             </p>
           </div>
-          <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5" /> New Job
-          </Button>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => fetchJobs(true)}
+                  disabled={loading || refreshing}
+                >
+                  <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh</TooltipContent>
+            </Tooltip>
+            <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5" /> New Job
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* Content */}
       <ScrollArea className="flex-1">
         <div className="p-4 sm:p-6 space-y-3">
-          <AnimatePresence mode="popLayout">
-            {jobs.map(job => {
-              const statusConfig = {
-                active: { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10', badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400' },
-                paused: { icon: Pause, color: 'text-amber-500', bg: 'bg-amber-500/10', badgeClass: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-500/10 dark:text-amber-400' },
-                error: { icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10', badgeClass: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400' },
-              }[job.status];
-              const StatusIcon = statusConfig.icon;
+          {/* Loading state */}
+          {loading && (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <JobCardSkeleton key={i} />
+              ))}
+            </div>
+          )}
 
-              return (
-                <motion.div
-                  key={job.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Card className="hover:shadow-md transition-all duration-200 group">
-                    <CardContent className="p-4">
-                      <div className="flex items-start gap-4">
-                        {/* Icon */}
-                        <div className={cn('p-2 rounded-lg shrink-0 mt-0.5', statusConfig.bg)}>
-                          <StatusIcon className={cn('size-4', statusConfig.color)} />
-                        </div>
+          {/* Error state */}
+          {!loading && error && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-center justify-center py-20 text-center"
+            >
+              <div className="p-3 rounded-full bg-red-500/10 mb-3">
+                <AlertCircle className="size-5 text-red-500" />
+              </div>
+              <p className="text-sm font-medium">Failed to load cron jobs</p>
+              <p className="text-xs text-muted-foreground mt-1 mb-4">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => fetchJobs()}>
+                <RefreshCw className="size-3.5 mr-1.5" /> Try again
+              </Button>
+            </motion.div>
+          )}
 
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-sm font-semibold truncate">{job.name}</h3>
-                            <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', statusConfig.badgeClass)}>
-                              {job.status}
-                            </Badge>
+          {/* Job list */}
+          {!loading && !error && (
+            <AnimatePresence mode="popLayout">
+              {jobs.map(job => {
+                const status = deriveStatus(job);
+                const config = STATUS_CONFIG[status];
+                const StatusIcon = config.icon;
+                const lastRun = formatDate(job.lastRunAt);
+                const nextRun = formatDate(job.nextRunAt);
+
+                return (
+                  <motion.div
+                    key={job.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.96 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <Card className="hover:shadow-md transition-all duration-200 group">
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-4">
+                          {/* Icon */}
+                          <div className={cn('p-2 rounded-lg shrink-0 mt-0.5', config.bg)}>
+                            <StatusIcon className={cn('size-4', config.color)} />
                           </div>
 
-                          <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{job.task}</p>
-
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <Clock className="size-3" />
-                              <code className="text-[11px] font-mono bg-muted/50 px-1.5 py-0.5 rounded">{job.schedule}</code>
-                              <span className="text-[10px]">{humanReadableCron(job.schedule)}</span>
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="text-sm font-semibold truncate">{job.name}</h3>
+                              <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', config.badgeClass)}>
+                                {status}
+                              </Badge>
                             </div>
-                            {job.lastRunAt && (
-                              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                Last: {format(job.lastRunAt, 'MMM d, HH:mm')}
-                              </span>
-                            )}
-                            {job.nextRunAt && (
-                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                                Next: {format(job.nextRunAt, 'MMM d, HH:mm')}
-                              </span>
-                            )}
+
+                            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{job.task}</p>
+
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Clock className="size-3" />
+                                <code className="text-[11px] font-mono bg-muted/50 px-1.5 py-0.5 rounded">{job.schedule}</code>
+                                <span className="text-[10px]">{humanReadableCron(job.schedule)}</span>
+                              </div>
+                              {lastRun && (
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  Last: {lastRun}
+                                </span>
+                              )}
+                              {nextRun && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                  Next: {nextRun}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-8 opacity-0 group-hover:opacity-100"
+                                  onClick={() => handleRunNow(job.name)}
+                                >
+                                  <Play className="size-3.5 text-emerald-500" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Run now</TooltipContent>
+                            </Tooltip>
+                            <Switch
+                              checked={job.isEnabled}
+                              onCheckedChange={() => handleToggle(job)}
+                              className="scale-90"
+                            />
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100">
+                                  <MoreHorizontal className="size-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem className="text-destructive" onClick={() => setDeleteId(job.id)}>
+                                  <Trash2 className="size-3.5" /> Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          )}
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-8 opacity-0 group-hover:opacity-100"
-                                onClick={() => handleRunNow(job.name)}
-                              >
-                                <Play className="size-3.5 text-emerald-500" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Run now</TooltipContent>
-                          </Tooltip>
-                          <Switch
-                            checked={job.isEnabled}
-                            onCheckedChange={() => handleToggle(job.id)}
-                            className="scale-90"
-                          />
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100">
-                                <MoreHorizontal className="size-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleteId(job.id)}>
-                                <Trash2 className="size-3.5" /> Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-
-          {jobs.length === 0 && (
+          {/* Empty state */}
+          {!loading && !error && jobs.length === 0 && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
               <div className="p-3 rounded-full bg-muted/60 mb-3"><Clock className="size-5 text-muted-foreground" /></div>
               <p className="text-sm font-medium">No cron jobs</p>
@@ -328,7 +532,10 @@ export function CronjobsView() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate}><Plus className="size-3.5 mr-1.5" /> Create Job</Button>
+            <Button onClick={handleCreate} disabled={creating}>
+              {creating && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+              <Plus className="size-3.5 mr-1.5" /> Create Job
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -342,7 +549,12 @@ export function CronjobsView() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => handleDelete(deleteId!)}>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteId && handleDelete(deleteId)}
+              disabled={deleting}
+            >
+              {deleting && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

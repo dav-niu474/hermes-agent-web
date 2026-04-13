@@ -883,3 +883,167 @@ Stage Summary:
 - 11 default skills initialized covering core hermes-agent capabilities
 - 16 tools registered in dynamic tool registry
 - Memory management API supports full CRUD operations
+
+---
+Task ID: 5
+Agent: cronjobs-fix-agent
+Task: Fix Cron Jobs View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing cronjobs-view.tsx and API routes (src/app/api/cronjobs/route.ts)
+- Read Prisma schema for CronJob model (id, name, schedule, task, isEnabled, lastRunAt, nextRunAt, status, createdAt, updatedAt)
+- Removed INITIAL_JOBS constant entirely
+- Added useEffect to fetch from GET /api/cronjobs on mount
+- Connected create dialog to POST /api/cronjobs with loading state
+- Connected toggle switch to PUT /api/cronjobs with { id, isEnabled } and optimistic update
+- Connected delete to DELETE /api/cronjobs with { id } and loading state
+- Added refresh button in header that re-fetches jobs
+- Added loading skeleton (3 card placeholders) for initial load
+- Added error state with "Try again" button
+- Handled null values for lastRunAt/nextRunAt (hidden when null)
+- Derived status from isEnabled: "active" if enabled, "paused" if not (with "error" preserved from API)
+- Changed CronJob interface to use string | null for date fields (JSON serialization)
+- Added formatDate helper with try/catch for safe date parsing
+- "Run now" button shows toast.info("Triggering...") as placeholder
+- All handlers use useCallback for proper memoization
+- Preserved existing visual design (framer-motion, shadcn/ui, status badges)
+
+Stage Summary:
+- Cron Jobs view now fully integrated with backend API
+- Jobs loaded from Prisma DB via /api/cronjobs
+- Create/Toggle/Delete operations properly call API and refresh list
+- Optimistic UI updates for toggle (rollback on error)
+- Loading skeletons, error state, and empty state all handled
+- ESLint: zero new errors (5 pre-existing in hermes-agent/)
+---
+Task ID: 3
+Agent: sessions-fix-agent
+Task: Fix Sessions View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing sessions-view.tsx — found 10 hardcoded MOCK_SESSIONS entries
+- Read /api/sessions (GET) — returns [{ id, title, model, createdAt, updatedAt, messageCount }]
+- Read /api/sessions/[id] (DELETE) — already exists, deletes session + messages via Prisma
+- Removed entire MOCK_SESSIONS constant (was 11 lines of fake data)
+- Added Session interface matching API response shape (createdAt/updatedAt as string, messageCount)
+- Added useEffect + useCallback fetchSessions() to load from GET /api/sessions on mount
+- Added loading state with 6 skeleton cards (SessionCardSkeleton component)
+- Added error state with AlertCircle icon, error message, and Retry button
+- Connected delete to DELETE /api/sessions/[id] with loading spinner, toast notifications, and list refresh
+- If deleted session was active, clears currentSessionId and messages from store
+- Export JSON shows toast.info('Export JSON — Coming soon')
+- Open navigates to chat view via setCurrentSessionId + setCurrentView
+- Kept search (title + model), added sort by updatedAt/createdAt/messageCount/model via dropdown
+- Updated filter: All Sessions / Recent (7d) / Has Messages (API has no status field)
+- Added relative time helper (Just now / 5m ago / 3h ago / 2d ago / MMM d, HH:mm)
+- Added Refresh button in header with spinning animation during load
+- Added empty state: "No sessions yet — Start a chat to see sessions here" with CTA button
+- Added filtered-empty state: "No sessions found — Try adjusting your search or filter"
+- Syncs fetched sessions to global store via setChatSessions()
+- Removed unused imports (Calendar, Separator)
+
+Stage Summary:
+- Sessions view now fully integrated with backend API
+- Sessions loaded from Prisma DB via GET /api/sessions
+- Delete confirmed via AlertDialog → DELETE /api/sessions/[id] → toast → list refresh
+- Loading skeletons, error states, and empty states all properly handled
+- ESLint: zero new errors (5 pre-existing in hermes-agent/ only)
+
+---
+Task ID: 4
+Agent: memory-fix-agent
+Task: Fix Memory View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing memory-view.tsx (370 lines) and API route at /api/memory (257 lines)
+- Read MemoryManager source to understand entry shape: { section: string, preview: string }
+- Removed INITIAL_MEMORIES constant and old MemoryEntry interface (category, tags, source, createdAt fields)
+- Simplified data model to { id: string, type: "memory"|"user", section: string, preview: string }
+- Added useEffect + useCallback fetchMemories() to load from GET /api/memory on mount
+- Connected Add dialog to POST /api/memory with action: "add", target: "memory"|"user", content
+- Connected Edit dialog to POST /api/memory with action: "replace", target, old_text, new_content
+- Connected Delete to POST /api/memory with action: "remove", target, old_text
+- All mutations call fetchMemories() to refetch after success
+- Category filter changed from 6 categories (preference, project, fact, skill, context) to 3 (all, memory, user)
+- Removed tag cloud, tag display, tag input from Add/Edit dialogs
+- Added refresh button with spinning animation in header
+- Added loading state with 5 Skeleton cards
+- Added error state with AlertCircle icon and "Try Again" button
+- Added empty state with CTA button when no entries exist
+- Replaced delete confirmation from inline click to AlertDialog component
+- Usage stats (memoryUsage, userUsage) displayed from API response
+- Added mutating state to disable buttons during API calls
+- Search input with clear button, filters client-side on section content
+
+Stage Summary:
+- Memory view now fully integrated with MemoryManager backend
+- Memories loaded from MEMORY.md/USER.md files via MemoryManager
+- Add/Edit/Delete operations call POST /api/memory with action-based CRUD
+- Usage stats displayed from API response (e.g., "1,234 / 5,000 chars")
+- File modified: src/components/hermes/views/memory-view.tsx (370 → 400 lines)
+- ESLint: zero new errors (5 pre-existing in hermes-agent/ only)
+
+
+---
+Task ID: 3
+Agent: sessions-fix-agent
+Task: Fix Sessions View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing sessions-view.tsx and API routes
+- Removed MOCK_SESSIONS constant (10 hardcoded fake sessions)
+- Added Session interface matching API response shape
+- Added fetchSessions() useCallback that fetches GET /api/sessions on mount
+- Connected delete to DELETE /api/sessions/[id] with toast notifications
+- Added loading skeletons, error states, empty states
+- Added refresh button, sort dropdown, relative time display
+- Updated filter options since API has no status field
+
+Stage Summary:
+- Sessions view now fully integrated with backend API
+- Sessions loaded from Prisma DB via /api/sessions
+- Delete confirmed with DELETE /api/sessions/[id] and list refresh
+
+---
+Task ID: 4
+Agent: memory-fix-agent
+Task: Fix Memory View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing memory-view.tsx and API routes
+- Removed INITIAL_MEMORIES constant (10 hardcoded mock entries)
+- Added useEffect to fetch from GET /api/memory on mount
+- Connected add to POST /api/memory with action: "add"
+- Connected edit to POST /api/memory with action: "replace"
+- Connected delete to POST /api/memory with action: "remove"
+- Added loading skeletons, error states, empty states
+- Simplified data model to match API (type: memory|user instead of categories)
+- Added usage stats display from API response
+
+Stage Summary:
+- Memory view now fully integrated with MemoryManager backend
+- Memories loaded from MEMORY.md/USER.md files via MemoryManager
+- Add/Edit/Delete operations call POST /api/memory with action-based CRUD
+- Usage stats displayed from API response
+
+---
+Task ID: 5
+Agent: cronjobs-fix-agent
+Task: Fix Cron Jobs View - Replace MOCK data with real API integration
+
+Work Log:
+- Read existing cronjobs-view.tsx and API routes
+- Removed INITIAL_JOBS constant (6 hardcoded mock jobs)
+- Added fetchJobs() useCallback that fetches GET /api/cronjobs on mount
+- Connected create to POST /api/cronjobs
+- Connected toggle to PUT /api/cronjobs with optimistic UI
+- Connected delete to DELETE /api/cronjobs
+- Added loading skeletons, error states, creating/deleting states
+- Handled null values for lastRunAt/nextRunAt
+- Added toast feedback for all operations
+
+Stage Summary:
+- Cron Jobs view now fully integrated with backend API
+- Jobs loaded from Prisma DB via /api/cronjobs
+- Create/Toggle/Delete operations properly call API and refresh list
+- Null date handling for lastRunAt/nextRunAt fields
