@@ -612,8 +612,8 @@ function SidebarContent({
           ))}
         </div>
 
-        {/* Chat History — New Chat + Recent Sessions, pushed to bottom within nav */}
-        <div className="mt-auto pt-3">
+        {/* Chat History — New Chat + Recent Sessions, directly below Cron Jobs */}
+        <div className="pt-2">
           <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
         </div>
       </nav>
