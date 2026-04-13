@@ -19,6 +19,7 @@ import {
   MessageSquarePlus,
   MoreHorizontal,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAppStore, type SidebarView, type ThemeStyle } from '@/store/app-store';
@@ -342,12 +343,15 @@ function ChatHistorySection({
   }>>([]);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(false);
 
   const currentView = useAppStore((s) => s.currentView);
   const currentSessionId = useAppStore((s) => s.currentSessionId);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
   const clearMessages = useAppStore((s) => s.clearMessages);
+  const addChatMessage = useAppStore((s) => s.addChatMessage);
+  const setSelectedModel = useAppStore((s) => s.setSelectedModel);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -379,12 +383,52 @@ function ChatHistorySection({
     onNavigate?.('chat');
   };
 
-  const handleSelectSession = (id: string) => {
-    setCurrentSessionId(id);
-    if (currentView !== 'chat') {
-      setCurrentView('chat');
+  const handleSelectSession = async (id: string) => {
+    if (loadingSession || id === currentSessionId) {
+      // If already selected, just ensure we're on chat view
+      if (currentView !== 'chat') {
+        setCurrentView('chat');
+        onNavigate?.('chat');
+      }
+      return;
     }
-    onNavigate?.('chat');
+    setLoadingSession(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error('Session not found');
+      const data = await res.json();
+
+      clearMessages();
+      setCurrentSessionId(id);
+
+      // Restore messages to store
+      const msgs = Array.isArray(data.messages) ? data.messages : [];
+      for (const m of msgs) {
+        addChatMessage({
+          id: m.id,
+          role: m.role,
+          content: m.content || '',
+          toolCalls: m.toolCalls,
+          tokens: m.tokens,
+          duration: m.duration,
+          createdAt: m.createdAt ? new Date(m.createdAt) : undefined,
+        });
+      }
+
+      // Restore model selection
+      if (data.model && data.model !== 'hermes-agent') {
+        setSelectedModel(data.model);
+      }
+
+      if (currentView !== 'chat') {
+        setCurrentView('chat');
+      }
+      onNavigate?.('chat');
+    } catch (err) {
+      console.error('Failed to load session:', err);
+    } finally {
+      setLoadingSession(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -453,13 +497,17 @@ function ChatHistorySection({
                   'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
                   isActive
                     ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                  loadingSession && 'pointer-events-none opacity-60'
                 )}
               >
+                {loadingSession && isActive && (
+                  <Loader2 className="size-3 animate-spin shrink-0 text-muted-foreground" />
+                )}
                 <span className="flex-1 min-w-0 text-[11px] font-medium truncate leading-tight">
                   {session.title}
                 </span>
-                <span className="text-[9px] text-muted-foreground/60 shrink-0 hidden group-hover:hidden">
+                <span className="text-[9px] text-muted-foreground/60 shrink-0 hidden group-hover:block">
                   {timeAgo}
                 </span>
                 <DropdownMenu>
