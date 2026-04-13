@@ -15,6 +15,7 @@ import {
   getToolsetFilter,
   scanSkills,
   getSkillContent,
+  manageSkill,
 } from "@/lib/hermes";
 import OpenAI from "openai";
 
@@ -139,6 +140,8 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
           return await this.handleSkillsList(args);
         case "skill_view":
           return await this.handleSkillView(args);
+        case "skill_manage":
+          return await this.handleSkillManage(args);
         case "memory":
           return await this.handleMemory(args);
         case "session_search":
@@ -364,6 +367,45 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         size: f.size,
       })),
     });
+  }
+
+  private async handleSkillManage(args: Record<string, unknown>): Promise<string> {
+    const action = String(args.action ?? "");
+    const name = String(args.name ?? "");
+
+    if (!action || !name) {
+      return JSON.stringify({ error: "Missing required parameters: action, name" });
+    }
+
+    const validActions = ["create", "patch", "edit", "delete"];
+    if (!validActions.includes(action)) {
+      return JSON.stringify({ error: `Invalid action '${action}'. Must be one of: ${validActions.join(", ")}` });
+    }
+
+    try {
+      const result = await manageSkill(action as "create" | "patch" | "edit" | "delete", {
+        name,
+        category: args.category ? String(args.category) : undefined,
+        description: args.description ? String(args.description) : undefined,
+        content: args.content ? String(args.content) : undefined,
+        instructions: args.instructions ? String(args.instructions) : undefined,
+      });
+
+      if (!result.success) {
+        return JSON.stringify({ error: result.error });
+      }
+
+      return JSON.stringify({
+        success: true,
+        action,
+        name,
+        path: result.path,
+        message: `Skill '${name}' ${action}d successfully.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({ error: `Skill management failed: ${msg}` });
+    }
   }
 
   private async handleMemory(args: Record<string, unknown>): Promise<string> {
@@ -603,8 +645,7 @@ export async function POST(request: NextRequest) {
     // ── Load skills system prompt ──
     let skillsPrompt = "";
     try {
-      const skills = await scanSkills({});
-      skillsPrompt = buildSkillsSystemPrompt(skills);
+      skillsPrompt = await buildSkillsSystemPrompt(toolRegistry.getValidToolNames());
     } catch (err) {
       console.warn("[Chat API] Failed to build skills prompt:", err);
     }
