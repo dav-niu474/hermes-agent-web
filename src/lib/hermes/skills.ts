@@ -30,6 +30,9 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 const SKILL_INDEX_FILE = 'SKILL.md';
 const DESCRIPTION_FILE = 'DESCRIPTION.md';
 
+// Cache the resolved hermes home to avoid repeated fs checks
+let _resolvedHermesHome: string | null = null;
+
 const PLATFORM_MAP: Record<string, string> = {
   macos: 'darwin',
   linux: 'linux',
@@ -82,9 +85,54 @@ export interface SkillManageResult {
 /**
  * Get the Hermes home directory.
  * Honors HERMES_HOME env var, falls back to ~/.hermes.
+ * In sandboxed environments where home is not writable, falls back to <project>/.hermes.
  */
 export function getHermesHome(): string {
-  return process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
+  if (_resolvedHermesHome) return _resolvedHermesHome;
+
+  const envHome = process.env.HERMES_HOME;
+  if (envHome) {
+    _resolvedHermesHome = envHome;
+    return envHome;
+  }
+
+  const homeDir = path.join(os.homedir(), '.hermes');
+  // Try the standard home directory first
+  try {
+    fs.accessSync(path.dirname(homeDir), fs.constants.W_OK);
+    _resolvedHermesHome = homeDir;
+    return homeDir;
+  } catch {
+    // Home dir not writable — fall back to project-relative .hermes
+    const projectRelative = path.join(getProjectRoot(), '.hermes');
+    _resolvedHermesHome = projectRelative;
+    return projectRelative;
+  }
+}
+
+/**
+ * Ensure the hermes home directory and its skills subdirectory exist.
+ * Called before any write operations (create/edit/patch).
+ */
+export async function ensureHermesHome(): Promise<string> {
+  const hermesHome = getHermesHome();
+  const skillsDir = path.join(hermesHome, 'skills');
+  try {
+    await fs.mkdir(skillsDir, { recursive: true });
+  } catch (err) {
+    // If even the project-relative path fails, try /tmp as last resort
+    const tmpHermes = '/tmp/.hermes';
+    try {
+      await fs.mkdir(path.join(tmpHermes, 'skills'), { recursive: true });
+      _resolvedHermesHome = tmpHermes;
+      return tmpHermes;
+    } catch {
+      throw new Error(
+        `Cannot create hermes home directory. Tried: ${hermesHome}, ${tmpHermes}. Original error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return hermesHome;
 }
 
 /**
@@ -579,11 +627,15 @@ async function getAllSkillsDirs(): Promise<string[]> {
   // 2. Optional skills in hermes-home
   dirs.push(path.join(hermesHome, 'optional-skills'));
 
-  // 3. Bundled skills from the hermes-agent repo
+  // 3. Project root skills/ directory (platform skills)
+  const projectSkills = path.join(projectRoot, 'skills');
+  dirs.push(projectSkills);
+
+  // 4. Bundled skills from the hermes-agent repo
   const bundledSkills = path.join(projectRoot, 'hermes-agent', 'skills');
   dirs.push(bundledSkills);
 
-  // 4. Bundled optional skills from the hermes-agent repo
+  // 5. Bundled optional skills from the hermes-agent repo
   const bundledOptional = path.join(
     projectRoot,
     'hermes-agent',
@@ -1018,7 +1070,8 @@ export async function manageSkill(
   action: 'create' | 'patch' | 'edit' | 'delete',
   options: SkillManageOptions,
 ): Promise<SkillManageResult> {
-  const hermesHome = getHermesHome();
+  // Ensure hermes home exists for write operations
+  const hermesHome = await ensureHermesHome();
   const localSkillsDir = path.join(hermesHome, 'skills');
   const category = options.category || 'general';
   const skillDir = path.join(localSkillsDir, category, options.name);

@@ -119,6 +119,14 @@ const WEB_COMPATIBLE_TOOLS = new Set([
   "todo",
   "session_search",
   "clarify",
+  "read_file",
+  "write_file",
+  "search_files",
+  "patch",
+  "terminal",
+  "execute_code",
+  "cronjob",
+  "browser_navigate",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -212,6 +220,22 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
           return this.handleTodo(args, _context);
         case "clarify":
           return this.handleClarify(args);
+        case "read_file":
+          return await this.handleReadFile(args);
+        case "write_file":
+          return await this.handleWriteFile(args);
+        case "search_files":
+          return await this.handleSearchFiles(args);
+        case "patch":
+          return await this.handlePatch(args);
+        case "terminal":
+          return await this.handleTerminal(args);
+        case "execute_code":
+          return await this.handleExecuteCode(args);
+        case "cronjob":
+          return await this.handleCronjob(args);
+        case "browser_navigate":
+          return await this.handleBrowserNavigate(args);
         default:
           return JSON.stringify({
             note: `Tool '${name}' is registered but not executable in the web API context.`,
@@ -672,6 +696,295 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
       clarificationNeeded: true,
       question,
     });
+  }
+
+  private async handleReadFile(args: Record<string, unknown>): Promise<string> {
+    const filePath = String(args.path ?? "");
+    if (!filePath.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: path" });
+    }
+    const { readFile } = await import("fs/promises");
+    const pathMod = await import("path");
+
+    try {
+      const workspaceRoot = process.env.HERMES_WORKSPACE || process.cwd();
+      let resolved: string;
+      if (pathMod.isAbsolute(filePath)) {
+        resolved = filePath;
+      } else {
+        resolved = pathMod.resolve(workspaceRoot, filePath);
+      }
+      // Security: ensure path is within workspace
+      const relative = pathMod.relative(workspaceRoot, resolved);
+      if (relative.startsWith("..")) {
+        return JSON.stringify({ error: `Access denied: path is outside workspace` });
+      }
+
+      const content = await readFile(resolved, "utf-8");
+      const lines = content.split("\n");
+      const offset = Math.max(1, Number(args.offset) || 1);
+      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 500));
+      const startIdx = offset - 1;
+      const endIdx = Math.min(lines.length, startIdx + limit);
+      const selectedLines = lines.slice(startIdx, endIdx);
+
+      const numbered = selectedLines
+        .map((line, i) => {
+          const lineNum = String(startIdx + i + 1).padStart(6, " ");
+          return `${lineNum}\t${line}`;
+        })
+        .join("\n");
+
+      return JSON.stringify({
+        content: numbered,
+        totalLines: lines.length,
+        shownLines: selectedLines.length,
+        startLine: offset,
+        endLine: startIdx + selectedLines.length,
+        path: resolved,
+        truncated: endIdx < lines.length,
+      });
+    } catch (err: any) {
+      return JSON.stringify({ error: `Failed to read file: ${err.message}` });
+    }
+  }
+
+  private async handleWriteFile(args: Record<string, unknown>): Promise<string> {
+    const filePath = String(args.path ?? "");
+    const content = String(args.content ?? "");
+    if (!filePath.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: path" });
+    }
+    const { writeFile, mkdir } = await import("fs/promises");
+    const pathMod = await import("path");
+
+    try {
+      const workspaceRoot = process.env.HERMES_WORKSPACE || process.cwd();
+      let resolved: string;
+      if (pathMod.isAbsolute(filePath)) {
+        resolved = filePath;
+      } else {
+        resolved = pathMod.resolve(workspaceRoot, filePath);
+      }
+      const relative = pathMod.relative(workspaceRoot, resolved);
+      if (relative.startsWith("..")) {
+        return JSON.stringify({ error: `Access denied: path is outside workspace` });
+      }
+
+      const dir = pathMod.dirname(resolved);
+      await mkdir(dir, { recursive: true });
+      await writeFile(resolved, content, "utf-8");
+
+      return JSON.stringify({
+        success: true,
+        path: resolved,
+        bytesWritten: Buffer.byteLength(content, "utf-8"),
+        message: `File written successfully: ${resolved}`,
+      });
+    } catch (err: any) {
+      return JSON.stringify({ error: `Failed to write file: ${err.message}` });
+    }
+  }
+
+  private async handleSearchFiles(args: Record<string, unknown>): Promise<string> {
+    const pattern = String(args.pattern ?? "");
+    if (!pattern.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: pattern" });
+    }
+    const { exec: execCmd } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(execCmd);
+    const pathMod = await import("path");
+
+    const workspaceRoot = process.env.HERMES_WORKSPACE || process.cwd();
+    const searchPath = args.path ? pathMod.resolve(workspaceRoot, String(args.path)) : workspaceRoot;
+    const maxResults = Math.min(200, Number(args.max_results) || 50);
+    const fileType = args.file_type ? String(args.file_type) : "";
+
+    try {
+      let cmd: string;
+      if (fileType) {
+        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} -t ${fileType} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
+      } else {
+        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
+      }
+
+      const { stdout } = await execAsync(cmd, { timeout: 15000, maxBuffer: 1024 * 1024 });
+      const matches = stdout.split("\n").filter(Boolean).slice(0, maxResults);
+      const results = matches.map((line) => {
+        const colonIdx = line.indexOf(":");
+        if (colonIdx === -1) return { file: "", line: 0, content: line };
+        const file = line.slice(0, colonIdx);
+        const rest = line.slice(colonIdx + 1);
+        const secondColon = rest.indexOf(":");
+        if (secondColon === -1) return { file, line: 0, content: rest };
+        return { file, line: parseInt(rest.slice(0, secondColon), 10), content: rest.slice(secondColon + 1) };
+      });
+      return JSON.stringify({ matches: results, totalMatches: results.length, pattern, truncated: results.length >= maxResults });
+    } catch (err: any) {
+      if (err.code === 1 && !err.stdout) {
+        return JSON.stringify({ matches: [], totalMatches: 0, pattern, message: "No matches found." });
+      }
+      return JSON.stringify({ error: `Search failed: ${err.message}` });
+    }
+  }
+
+  private async handlePatch(args: Record<string, unknown>): Promise<string> {
+    const filePath = String(args.path ?? "");
+    const oldString = String(args.old_string ?? "");
+    const newString = String(args.new_string ?? "");
+    if (!filePath.trim() || !oldString) {
+      return JSON.stringify({ error: "Missing required parameters: path, old_string" });
+    }
+    const { readFile, writeFile } = await import("fs/promises");
+    const pathMod = await import("path");
+
+    try {
+      const workspaceRoot = process.env.HERMES_WORKSPACE || process.cwd();
+      let resolved: string;
+      if (pathMod.isAbsolute(filePath)) {
+        resolved = filePath;
+      } else {
+        resolved = pathMod.resolve(workspaceRoot, filePath);
+      }
+      const relative = pathMod.relative(workspaceRoot, resolved);
+      if (relative.startsWith("..")) {
+        return JSON.stringify({ error: `Access denied: path is outside workspace` });
+      }
+
+      let content = await readFile(resolved, "utf-8");
+      if (!content.includes(oldString)) {
+        return JSON.stringify({ error: `Pattern not found in file. The old_string does not match any content.` });
+      }
+      const occurrences = content.split(oldString).length - 1;
+      content = content.replaceAll(oldString, newString);
+      await writeFile(resolved, content, "utf-8");
+      return JSON.stringify({
+        success: true,
+        path: resolved,
+        replacements: occurrences,
+        message: `Patched ${occurrences} occurrence(s) in ${resolved}`,
+      });
+    } catch (err: any) {
+      return JSON.stringify({ error: `Failed to patch file: ${err.message}` });
+    }
+  }
+
+  private async handleTerminal(args: Record<string, unknown>): Promise<string> {
+    const command = String(args.command ?? "");
+    if (!command.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: command" });
+    }
+    const { exec: execCmd } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(execCmd);
+    const pathMod = await import("path");
+
+    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || 60)) * 1000;
+    const workdir = process.env.HERMES_WORKSPACE || process.cwd();
+
+    try {
+      const { stdout, stderr } = await execAsync(command, {
+        timeout,
+        maxBuffer: 1024 * 1024,
+        cwd: workdir,
+      });
+      return JSON.stringify({
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd() || undefined,
+        exitCode: 0,
+        workdir,
+      });
+    } catch (err: any) {
+      return JSON.stringify({
+        stdout: (err.stdout || "").trimEnd(),
+        stderr: (err.stderr || err.message || "").trimEnd(),
+        exitCode: err.code || 1,
+        timedOut: err.killed === true,
+      });
+    }
+  }
+
+  private async handleExecuteCode(args: Record<string, unknown>): Promise<string> {
+    const code = String(args.code ?? "");
+    const language = String(args.language ?? "python");
+    if (!code.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: code" });
+    }
+    const { exec: execCmd } = await import("child_process");
+    const { promisify } = await import("util");
+    const { writeFile, unlink } = await import("fs/promises");
+    const pathMod = await import("path");
+    const execAsync = promisify(execCmd);
+
+    try {
+      let tmpFile: string;
+      let cmd: string;
+      if (language === "javascript" || language === "js" || language === "node") {
+        tmpFile = pathMod.join("/tmp", `hermes-code-${Date.now()}.js`);
+        await writeFile(tmpFile, code, "utf-8");
+        cmd = `node "${tmpFile}"`;
+      } else {
+        tmpFile = pathMod.join("/tmp", `hermes-code-${Date.now()}.py`);
+        await writeFile(tmpFile, code, "utf-8");
+        cmd = `python3 "${tmpFile}"`;
+      }
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 30000, maxBuffer: 1024 * 1024 });
+      await unlink(tmpFile).catch(() => {});
+      return JSON.stringify({ output: stdout, errors: stderr, language });
+    } catch (err: any) {
+      return JSON.stringify({
+        output: err.stdout || "",
+        errors: err.stderr || err.message,
+        exitCode: err.code,
+        language,
+      });
+    }
+  }
+
+  private async handleCronjob(args: Record<string, unknown>): Promise<string> {
+    const action = String(args.action ?? "list");
+    try {
+      const cronModule = await import("@/lib/cron-client");
+      switch (action) {
+        case "list": {
+          const jobs = await cronModule.listCronJobs();
+          return JSON.stringify({ jobs, total: jobs.length });
+        }
+        case "create": {
+          const name = String(args.name ?? "");
+          const schedule = String(args.schedule ?? "");
+          const task = String(args.task ?? "");
+          if (!name || !schedule || !task) {
+            return JSON.stringify({ error: "Missing required parameters: name, schedule, task" });
+          }
+          const job = await cronModule.createCronJob({ name, schedule, task });
+          return JSON.stringify({ success: true, job, message: `Cron job '${name}' created` });
+        }
+        case "delete": {
+          const jobId = String(args.job_id ?? "");
+          if (!jobId) return JSON.stringify({ error: "Missing job_id" });
+          await cronModule.deleteCronJob(jobId);
+          return JSON.stringify({ success: true, message: `Cron job ${jobId} deleted` });
+        }
+        default:
+          return JSON.stringify({ error: `Unknown cron action: ${action}` });
+      }
+    } catch (err: any) {
+      if (err.code === "MODULE_NOT_FOUND") {
+        return JSON.stringify({ note: "Cron management not available in this environment.", action });
+      }
+      return JSON.stringify({ error: `Cron ${action} failed: ${err.message}` });
+    }
+  }
+
+  private async handleBrowserNavigate(args: Record<string, unknown>): Promise<string> {
+    const url = String(args.url ?? "");
+    if (!url.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: url" });
+    }
+    // In web mode, use web_extract as a lightweight alternative
+    return await this.handleWebExtract({ urls: [url] });
   }
 }
 

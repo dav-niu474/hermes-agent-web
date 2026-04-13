@@ -112,9 +112,19 @@ const WEB_COMPATIBLE_TOOLS = new Set([
   "text_to_speech",
   "skills_list",
   "skill_view",
+  "skill_manage",
   "memory",
+  "todo",
   "session_search",
   "clarify",
+  "read_file",
+  "write_file",
+  "search_files",
+  "patch",
+  "terminal",
+  "execute_code",
+  "cronjob",
+  "browser_navigate",
 ]);
 
 // ---------------------------------------------------------------------------

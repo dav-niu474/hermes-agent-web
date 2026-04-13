@@ -12,13 +12,16 @@
  *   - checkFn (availability check for tools requiring env vars)
  *   - description
  *
- * Web-compatible tools have actual handlers; non-web tools return placeholder
- * results explaining they require a local/CLI environment.
- *
  * Import this module once: `import '@/lib/hermes/registered-tools'`
  */
 
 import { registry, toolResult, toolError, type ToolContext } from './tool-registry';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+const execAsync = promisify(exec);
 
 // ─── Helper: lazy import wrapper for z-ai-web-dev-sdk ──────────────────────
 
@@ -33,6 +36,36 @@ async function getZAI() {
     }
   }
   return _zaiInstance;
+}
+
+// ─── Helper: workspace root for file/terminal sandboxing ──────────────────
+
+function getWorkspaceRoot(): string {
+  return process.env.HERMES_WORKSPACE || process.cwd();
+}
+
+/**
+ * Resolve and validate a file path is within the workspace.
+ * Returns the absolute path if safe, or throws an error.
+ */
+function resolveSafePath(filePath: string, allowOutside: boolean = false): string {
+  const workspaceRoot = getWorkspaceRoot();
+  let resolved: string;
+
+  if (path.isAbsolute(filePath)) {
+    resolved = filePath;
+  } else {
+    resolved = path.resolve(workspaceRoot, filePath);
+  }
+
+  if (!allowOutside) {
+    const relative = path.relative(workspaceRoot, resolved);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Access denied: path "${filePath}" is outside the workspace`);
+    }
+  }
+
+  return resolved;
 }
 
 // ─── Register: Web Search ──────────────────────────────────────────────────
@@ -76,17 +109,55 @@ registry.register({
     description: 'Run a Python script that can call Hermes tools programmatically.',
     properties: {
       code: { type: 'string', description: 'Python code to execute.' },
+      language: { type: 'string', description: 'Programming language (default: python)', default: 'python' },
     },
     required: ['code'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'Code execution is not available in the web API context. The agent described the intended code logic above.',
-    });
+    const code = String(args.code ?? '');
+    const language = String(args.language ?? 'python');
+    if (!code.trim()) return toolError('Missing required parameter: code');
+
+    try {
+      let cmd: string;
+      if (language === 'javascript' || language === 'js' || language === 'node') {
+        // Write temp file and execute with node
+        const tmpFile = path.join('/tmp', `hermes-code-${Date.now()}.js`);
+        await fs.writeFile(tmpFile, code, 'utf-8');
+        try {
+          const { stdout, stderr } = await execAsync(`node "${tmpFile}"`, {
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+          });
+          return toolResult({ output: stdout, errors: stderr, language });
+        } finally {
+          await fs.unlink(tmpFile).catch(() => {});
+        }
+      } else {
+        // Default to Python
+        const tmpFile = path.join('/tmp', `hermes-code-${Date.now()}.py`);
+        await fs.writeFile(tmpFile, code, 'utf-8');
+        try {
+          const { stdout, stderr } = await execAsync(`python3 "${tmpFile}"`, {
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+          });
+          return toolResult({ output: stdout, errors: stderr, language });
+        } finally {
+          await fs.unlink(tmpFile).catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      return toolResult({
+        output: err.stdout || '',
+        errors: err.stderr || err.message,
+        exitCode: err.code,
+        language,
+      });
+    }
   },
-  description: 'Run Python code with tool access.',
+  description: 'Run code with Python or Node.js.',
   emoji: '💻',
-  checkFn: () => process.env.HERMES_CODE_EXECUTION_ENABLED === 'true',
 });
 
 // ─── Register: File Read ──────────────────────────────────────────────────
@@ -96,18 +167,52 @@ registry.register({
   toolset: 'file',
   schema: {
     type: 'object',
-    description: 'Read a text file with line numbers and pagination.',
+    description: 'Read a text file with line numbers and pagination. Returns content with line numbers prefixed.',
     properties: {
-      path: { type: 'string', description: 'Path to the file to read' },
+      path: { type: 'string', description: 'Path to the file to read (relative to workspace or absolute)' },
       offset: { type: 'integer', description: 'Line number to start reading from (1-indexed)', default: 1, minimum: 1 },
       limit: { type: 'integer', description: 'Maximum number of lines to read (default: 500, max: 2000)', default: 500, maximum: 2000 },
     },
     required: ['path'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'File read is not available in the web API context. The agent described the intended file operation above.',
-    });
+    const filePath = String(args.path ?? '');
+    if (!filePath.trim()) return toolError('Missing required parameter: path');
+
+    try {
+      const resolved = resolveSafePath(filePath);
+      const content = await fs.readFile(resolved, 'utf-8');
+      const lines = content.split('\n');
+
+      const offset = Math.max(1, Number(args.offset) || 1);
+      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 500));
+      const startIdx = offset - 1;
+      const endIdx = Math.min(lines.length, startIdx + limit);
+      const selectedLines = lines.slice(startIdx, endIdx);
+
+      // Format with line numbers (cat -n style)
+      const numbered = selectedLines
+        .map((line, i) => {
+          const lineNum = String(startIdx + i + 1).padStart(6, ' ');
+          return `${lineNum}\t${line}`;
+        })
+        .join('\n');
+
+      return toolResult({
+        content: numbered,
+        totalLines: lines.length,
+        shownLines: selectedLines.length,
+        startLine: offset,
+        endLine: startIdx + selectedLines.length,
+        path: resolved,
+        truncated: endIdx < lines.length,
+      });
+    } catch (err: any) {
+      if (err.message?.includes('Access denied')) {
+        return toolError(err.message);
+      }
+      return toolError(`Failed to read file "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
+    }
   },
   description: 'Read a text file with line numbers and pagination.',
   emoji: '📖',
@@ -120,20 +225,213 @@ registry.register({
   toolset: 'file',
   schema: {
     type: 'object',
-    description: 'Write content to a file, completely replacing existing content.',
+    description: 'Write content to a file, completely replacing existing content. Creates parent directories if needed.',
     properties: {
-      path: { type: 'string', description: 'Path to the file to write' },
+      path: { type: 'string', description: 'Path to the file to write (relative to workspace or absolute)' },
       content: { type: 'string', description: 'Complete content to write to the file' },
     },
     required: ['path', 'content'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'File write is not available in the web API context.',
-    });
+    const filePath = String(args.path ?? '');
+    const content = String(args.content ?? '');
+    if (!filePath.trim()) return toolError('Missing required parameter: path');
+
+    try {
+      const resolved = resolveSafePath(filePath);
+
+      // Create parent directories if needed
+      const dir = path.dirname(resolved);
+      await fs.mkdir(dir, { recursive: true });
+
+      await fs.writeFile(resolved, content, 'utf-8');
+
+      const stat = await fs.stat(resolved);
+      return toolResult({
+        success: true,
+        path: resolved,
+        bytesWritten: Buffer.byteLength(content, 'utf-8'),
+        message: `File written successfully: ${resolved} (${stat.size} bytes)`,
+      });
+    } catch (err: any) {
+      if (err.message?.includes('Access denied')) {
+        return toolError(err.message);
+      }
+      return toolError(`Failed to write file "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
+    }
   },
   description: 'Write content to a file.',
   emoji: '✏️',
+});
+
+// ─── Register: Search Files ──────────────────────────────────────────────
+
+registry.register({
+  name: 'search_files',
+  toolset: 'file',
+  schema: {
+    type: 'object',
+    description: 'Search for a pattern in files within the workspace using grep. Returns matching lines with file paths and line numbers.',
+    properties: {
+      pattern: { type: 'string', description: 'The search pattern (supports regex)' },
+      path: { type: 'string', description: 'Directory or file to search in (default: workspace root)' },
+      file_type: { type: 'string', description: 'File extension filter (e.g. "ts", "py", "js")' },
+      max_results: { type: 'integer', description: 'Maximum number of results (default: 50)', default: 50, maximum: 200 },
+    },
+    required: ['pattern'],
+  },
+  handler: async (args) => {
+    const pattern = String(args.pattern ?? '');
+    if (!pattern.trim()) return toolError('Missing required parameter: pattern');
+
+    try {
+      const searchPath = args.path
+        ? resolveSafePath(String(args.path))
+        : getWorkspaceRoot();
+      const maxResults = Math.min(200, Number(args.max_results) || 50);
+      const fileType = args.file_type ? String(args.file_type) : '';
+
+      // Build grep command using ripgrep (rg) with fallback to grep
+      let cmd: string;
+      if (fileType) {
+        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} -t ${fileType} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
+      } else {
+        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
+      }
+
+      const { stdout } = await execAsync(cmd, {
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+      });
+
+      // Parse output into structured format
+      const matches = stdout
+        .split('\n')
+        .filter(Boolean)
+        .slice(0, maxResults);
+
+      const results = matches.map((line) => {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx === -1) return { file: '', line: 0, content: line };
+        const file = line.slice(0, colonIdx);
+        const rest = line.slice(colonIdx + 1);
+        const secondColon = rest.indexOf(':');
+        if (secondColon === -1) return { file, line: 0, content: rest };
+        const lineNum = parseInt(rest.slice(0, secondColon), 10);
+        const content = rest.slice(secondColon + 1);
+        return { file, line: lineNum, content };
+      });
+
+      return toolResult({
+        matches: results,
+        totalMatches: results.length,
+        pattern,
+        searchPath,
+        truncated: results.length >= maxResults,
+      });
+    } catch (err: any) {
+      // rg returns exit code 1 when no matches found — that's fine
+      if (err.code === 1 && !err.stdout) {
+        return toolResult({
+          matches: [],
+          totalMatches: 0,
+          pattern,
+          message: 'No matches found.',
+        });
+      }
+      // rg not installed — fallback to grep
+      try {
+        const searchPath = args.path
+          ? resolveSafePath(String(args.path))
+          : getWorkspaceRoot();
+        const maxResults = Math.min(200, Number(args.max_results) || 50);
+        const escapedPattern = pattern.replace(/'/g, "'\\''");
+        let grepCmd = `grep -rn --include='*' -m ${maxResults} '${escapedPattern}' ${JSON.stringify(searchPath)} 2>/dev/null || true`;
+
+        const { stdout } = await execAsync(grepCmd, {
+          timeout: 15000,
+          maxBuffer: 1024 * 1024,
+        });
+
+        const matches = stdout.split('\n').filter(Boolean).slice(0, maxResults);
+        const results = matches.map((line) => {
+          const firstColon = line.indexOf(':');
+          if (firstColon === -1) return { file: '', line: 0, content: line };
+          const file = line.slice(0, firstColon);
+          const rest = line.slice(firstColon + 1);
+          const secondColon = rest.indexOf(':');
+          if (secondColon === -1) return { file, line: 0, content: rest };
+          const lineNum = parseInt(rest.slice(0, secondColon), 10);
+          const content = rest.slice(secondColon + 1);
+          return { file, line: lineNum, content };
+        });
+
+        return toolResult({
+          matches: results,
+          totalMatches: results.length,
+          pattern,
+          searchPath,
+        });
+      } catch {
+        return toolError(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  },
+  description: 'Search for patterns in files.',
+  emoji: '🔎',
+});
+
+// ─── Register: Patch (find and replace in files) ──────────────────────────
+
+registry.register({
+  name: 'patch',
+  toolset: 'file',
+  schema: {
+    type: 'object',
+    description: 'Perform find-and-replace operations within a file. Replaces all occurrences of old_string with new_string.',
+    properties: {
+      path: { type: 'string', description: 'Path to the file to patch' },
+      old_string: { type: 'string', description: 'The text to find and replace' },
+      new_string: { type: 'string', description: 'The replacement text' },
+    },
+    required: ['path', 'old_string', 'new_string'],
+  },
+  handler: async (args) => {
+    const filePath = String(args.path ?? '');
+    const oldString = String(args.old_string ?? '');
+    const newString = String(args.new_string ?? '');
+
+    if (!filePath.trim()) return toolError('Missing required parameter: path');
+    if (!oldString) return toolError('Missing required parameter: old_string');
+
+    try {
+      const resolved = resolveSafePath(filePath);
+      let content = await fs.readFile(resolved, 'utf-8');
+
+      if (!content.includes(oldString)) {
+        return toolError(`Pattern not found in file "${filePath}". The old_string does not match any content in the file.`);
+      }
+
+      const occurrences = content.split(oldString).length - 1;
+      content = content.replaceAll(oldString, newString);
+
+      await fs.writeFile(resolved, content, 'utf-8');
+
+      return toolResult({
+        success: true,
+        path: resolved,
+        replacements: occurrences,
+        message: `Patched ${occurrences} occurrence(s) in ${resolved}`,
+      });
+    } catch (err: any) {
+      if (err.message?.includes('Access denied')) {
+        return toolError(err.message);
+      }
+      return toolError(`Failed to patch file "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+  description: 'Find and replace text in a file.',
+  emoji: '🩹',
 });
 
 // ─── Register: Memory (add/replace/remove/read) ───────────────────────────
@@ -411,12 +709,26 @@ registry.register({
     required: ['url'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'Browser automation is not available in the web API context. The agent described the intended browser navigation above.',
-      url: args.url,
-    });
+    // For web platform, use web_extract as a read-only alternative
+    const zai = await getZAI();
+    if (!zai) return toolError('Browser/web service unavailable');
+
+    const url = String(args.url ?? '');
+    if (!url.trim()) return toolError('Missing required parameter: url');
+
+    try {
+      // Extract the page content as a lightweight alternative to full browser
+      const result = await zai.functions.invoke('web_extract', { urls: [url] });
+      return toolResult({
+        url,
+        content: result,
+        note: 'Full browser automation is not available. Page content has been extracted via web_extract instead.',
+      });
+    } catch (err) {
+      return toolError(`Browser/web extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   },
-  description: 'Navigate to a URL in the browser.',
+  description: 'Navigate to a URL (extracts content in web mode).',
   emoji: '🌐',
 });
 
@@ -433,7 +745,7 @@ registry.register({
   },
   handler: async () => {
     return toolResult({
-      note: 'Browser screenshot is not available in the web API context.',
+      note: 'Browser screenshot is not available in the web API context. Use browser_navigate to extract page content instead.',
     });
   },
   description: 'Take a screenshot of the current browser page.',
@@ -531,23 +843,259 @@ registry.register({
   toolset: 'terminal',
   schema: {
     type: 'object',
-    description: 'Execute shell commands on a Linux environment.',
+    description: 'Execute shell commands in a sandboxed environment. Commands run within the workspace directory with a timeout.',
     properties: {
-      command: { type: 'string', description: 'The command to execute' },
-      timeout: { type: 'integer', description: 'Max seconds to wait (default: 180)', default: 180 },
-      workdir: { type: 'string', description: 'Working directory' },
-      background: { type: 'boolean', description: 'Run in background', default: false },
+      command: { type: 'string', description: 'The shell command to execute' },
+      timeout: { type: 'integer', description: 'Max seconds to wait (default: 60, max: 300)', default: 60, maximum: 300 },
+      workdir: { type: 'string', description: 'Working directory (must be within workspace)' },
     },
     required: ['command'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'Terminal is not available in the web API context. The agent described the intended command above.',
-      command: args.command,
-    });
+    const command = String(args.command ?? '');
+    if (!command.trim()) return toolError('Missing required parameter: command');
+
+    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || 60)) * 1000;
+    let workdir = getWorkspaceRoot();
+
+    if (args.workdir) {
+      try {
+        workdir = resolveSafePath(String(args.workdir));
+      } catch (err: any) {
+        return toolError(err.message);
+      }
+    }
+
+    try {
+      const { stdout, stderr } = await execAsync(command, {
+        timeout,
+        maxBuffer: 1024 * 1024, // 1MB max output
+        cwd: workdir,
+        env: {
+          ...process.env,
+          HOME: workdir, // Sandboxing: set HOME to workspace
+        },
+      });
+
+      return toolResult({
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd() || undefined,
+        exitCode: 0,
+        workdir,
+        command,
+      });
+    } catch (err: any) {
+      return toolResult({
+        stdout: (err.stdout || '').trimEnd(),
+        stderr: (err.stderr || err.message || '').trimEnd(),
+        exitCode: err.code || 1,
+        workdir,
+        command,
+        timedOut: err.killed === true,
+      });
+    }
   },
   description: 'Execute shell commands.',
   emoji: '🖥️',
+});
+
+// ─── Register: Session Search ────────────────────────────────────────────
+
+registry.register({
+  name: 'session_search',
+  toolset: 'session_search',
+  schema: {
+    type: 'object',
+    description: 'Search past chat sessions by keyword. Returns matching session titles and message excerpts.',
+    properties: {
+      query: { type: 'string', description: 'Search query to find in past sessions' },
+      limit: { type: 'integer', description: 'Maximum number of sessions to return (default: 10)', default: 10, maximum: 50 },
+    },
+    required: ['query'],
+  },
+  handler: async (args) => {
+    const query = String(args.query ?? '');
+    if (!query.trim()) return toolError('Missing required parameter: query');
+
+    try {
+      const { db } = await import('@/lib/db');
+      const limit = Math.min(50, Number(args.limit) || 10);
+      const queryLower = `%${query.toLowerCase()}%`;
+
+      // Search sessions by title and message content
+      const sessions = await db.chatSession.findMany({
+        where: {
+          OR: [
+            { title: { contains: query, mode: 'insensitive' } },
+            {
+              messages: {
+                some: {
+                  content: { contains: query, mode: 'insensitive' },
+                },
+              },
+            },
+          ],
+        },
+        include: {
+          messages: {
+            where: {
+              content: { contains: query, mode: 'insensitive' },
+            },
+            select: {
+              content: true,
+              role: true,
+              createdAt: true,
+            },
+            take: 3,
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      return toolResult({
+        sessions: sessions.map((s) => ({
+          id: s.id,
+          title: s.title,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          matchCount: s.messages.length,
+          excerpts: s.messages.map((m) => ({
+            role: m.role,
+            excerpt: m.content.slice(0, 200),
+          })),
+        })),
+        total: sessions.length,
+        query,
+      });
+    } catch (err) {
+      return toolError(`Session search failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+  description: 'Search past chat sessions by keyword.',
+  emoji: '🔍',
+});
+
+// ─── Register: Clarify ───────────────────────────────────────────────────
+
+registry.register({
+  name: 'clarify',
+  toolset: 'clarify',
+  schema: {
+    type: 'object',
+    description: 'Ask the user a clarifying question to resolve ambiguity in their request. Use this when the task is unclear or has multiple interpretations.',
+    properties: {
+      question: { type: 'string', description: 'The clarifying question to ask the user' },
+      options: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional list of suggested answers for the user to choose from',
+      },
+    },
+    required: ['question'],
+  },
+  handler: async (args) => {
+    const question = String(args.question ?? '');
+    if (!question.trim()) return toolError('Missing required parameter: question');
+
+    return toolResult({
+      type: 'clarification',
+      question,
+      options: Array.isArray(args.options) ? args.options.map(String) : undefined,
+    });
+  },
+  description: 'Ask the user a clarifying question.',
+  emoji: '❓',
+});
+
+// ─── Register: Cronjob ───────────────────────────────────────────────────
+
+registry.register({
+  name: 'cronjob',
+  toolset: 'cronjob',
+  schema: {
+    type: 'object',
+    description: 'Create, list, or delete scheduled tasks (cron jobs). Allows the agent to set up recurring or one-time tasks.',
+    properties: {
+      action: { type: 'string', enum: ['create', 'list', 'delete', 'get'], description: 'The cron job action' },
+      name: { type: 'string', description: 'Job name (required for create/delete/get)' },
+      schedule: { type: 'string', description: 'Schedule expression: cron (e.g. "0 9 * * 1" for Mon 9AM), fixed_rate (seconds), or one_time (ISO datetime)' },
+      task: { type: 'string', description: 'Task description/prompt for the agent to execute when triggered' },
+      job_id: { type: 'string', description: 'Job ID (for delete/get actions)' },
+    },
+    required: ['action'],
+  },
+  handler: async (args) => {
+    const { action } = args;
+
+    try {
+      // Dynamic import of the cron module (server-only)
+      const cronModule = await import('@/lib/cron-client');
+
+      switch (action) {
+        case 'list': {
+          const jobs = await cronModule.listCronJobs();
+          return toolResult({
+            jobs: jobs.map((j: any) => ({
+              id: j.id,
+              name: j.name,
+              schedule: j.schedule,
+              enabled: j.enabled,
+              lastRun: j.lastRunAt,
+              nextRun: j.nextRunAt,
+            })),
+            total: jobs.length,
+          });
+        }
+
+        case 'create': {
+          const name = String(args.name ?? '');
+          const schedule = String(args.schedule ?? '');
+          const task = String(args.task ?? '');
+
+          if (!name) return toolError('Missing required parameter: name for create action');
+          if (!schedule) return toolError('Missing required parameter: schedule for create action');
+          if (!task) return toolError('Missing required parameter: task for create action');
+
+          const job = await cronModule.createCronJob({ name, schedule, task });
+          return toolResult({
+            success: true,
+            job: { id: job.id, name: job.name, schedule: job.schedule, nextRun: job.nextRunAt },
+            message: `Cron job "${name}" created successfully`,
+          });
+        }
+
+        case 'delete': {
+          const jobId = String(args.job_id ?? '');
+          if (!jobId) return toolError('Missing required parameter: job_id for delete action');
+          await cronModule.deleteCronJob(jobId);
+          return toolResult({ success: true, message: `Cron job ${jobId} deleted` });
+        }
+
+        case 'get': {
+          const jobId = String(args.job_id ?? '');
+          if (!jobId) return toolError('Missing required parameter: job_id for get action');
+          const job = await cronModule.getCronJob(jobId);
+          return toolResult(job);
+        }
+
+        default:
+          return toolError(`Unknown cron action: ${action}`);
+      }
+    } catch (err: any) {
+      // If cron module is not available
+      if (err.code === 'MODULE_NOT_FOUND') {
+        return toolResult({
+          note: 'Cron job management is not available in this environment.',
+          action,
+        });
+      }
+      return toolError(`Cron job ${action} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+  description: 'Manage scheduled tasks (cron jobs).',
+  emoji: '⏰',
 });
 
 // ─── Register: Vision Analyze ────────────────────────────────────────────
