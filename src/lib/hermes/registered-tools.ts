@@ -454,9 +454,35 @@ registry.register({
     required: ['text'],
   },
   handler: async (args) => {
-    return toolResult({
-      note: 'Text-to-speech is not available in the web API context.',
-    });
+    const zai = await getZAI();
+    if (!zai) return toolError('TTS service unavailable');
+
+    const text = String(args.text ?? '');
+    if (!text.trim()) return toolError('Missing required parameter: text');
+
+    const truncatedText = text.substring(0, 1024);
+
+    try {
+      const response = await zai.audio.tts.create({
+        input: truncatedText,
+        voice: 'tongtong',
+        speed: 1.0,
+        response_format: 'mp3',
+        stream: false,
+      });
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(new Uint8Array(arrayBuffer));
+      const audioBase64 = buffer.toString('base64');
+
+      return toolResult({
+        audioGenerated: true,
+        audioDataUrl: `data:audio/mp3;base64,${audioBase64}`,
+        textLength: text.length,
+      });
+    } catch (err) {
+      return toolError(`TTS failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   },
   description: 'Convert text to speech.',
   emoji: '🔊',

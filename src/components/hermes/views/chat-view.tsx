@@ -33,6 +33,7 @@ import {
   Terminal,
   X,
   Zap,
+  Volume2,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,11 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore, type ChatMessage, type ToolCallEntry } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -308,6 +314,129 @@ function ToolCallBlock({ entry }: { entry: ToolCallEntry }) {
 }
 
 /* ═════════════════════════════════════════════════════
+   MEDIA COMPONENTS (image / audio rendering for tool results)
+   ═════════════════════════════════════════════════════ */
+
+function MediaImage({ src, alt }: { src: string; alt: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <>
+      <div className="relative mt-2 inline-block">
+        {!loaded && (
+          <Skeleton className="w-[300px] max-w-full h-[200px] rounded-xl bg-muted/60" />
+        )}
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          onLoad={() => setLoaded(true)}
+          className={cn(
+            'max-w-[280px] sm:max-w-[300px] w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity object-contain border border-border/40',
+            loaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
+          )}
+          onClick={() => setExpanded(true)}
+        />
+      </div>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent className="max-w-4xl p-2 bg-black/90 border-white/10">
+          <img src={src} alt={alt} className="w-full rounded-lg" />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function MediaAudio({ src }: { src: string }) {
+  return (
+    <div className="mt-2 flex items-center gap-2 p-2 rounded-lg bg-muted/40 border border-border/40 max-w-[360px] w-full">
+      <Volume2 className="size-3.5 text-muted-foreground shrink-0" />
+      <audio controls className="flex-1 h-8 max-w-[320px]" preload="metadata">
+        <source src={src} />
+      </audio>
+    </div>
+  );
+}
+
+/* ── Parse message content into text + media segments ── */
+
+interface MediaSegment {
+  type: 'text' | 'image' | 'audio';
+  content: string;
+}
+
+/**
+ * Splits a message content string into alternating text and media segments.
+ * Detects `data:image/...;base64,...` and `data:audio/...;base64,...` patterns.
+ */
+function parseMediaSegments(content: string): MediaSegment[] {
+  // Matches data:image/xxx;base64,<base64data> or data:audio/xxx;base64,<base64data>
+  // Base64 chars: A-Za-z0-9+/=
+  const regex = /(data:(?:image|audio)\/[a-zA-Z0-9.+\-]+;base64,[A-Za-z0-9+/=]+)/g;
+  const segments: MediaSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    const fullMatch = match[0];
+    const matchStart = match.index;
+    const matchEnd = matchStart + fullMatch.length;
+    const mediaType = fullMatch.startsWith('data:image') ? 'image' : 'audio';
+
+    // Text before this media URL
+    if (matchStart > lastIndex) {
+      const textBefore = content.slice(lastIndex, matchStart);
+      if (textBefore.trim()) {
+        segments.push({ type: 'text', content: textBefore });
+      }
+    }
+
+    segments.push({ type: mediaType, content: fullMatch });
+    lastIndex = matchEnd;
+  }
+
+  // Remaining text after last media URL
+  if (lastIndex < content.length) {
+    const remaining = content.slice(lastIndex);
+    if (remaining.trim()) {
+      segments.push({ type: 'text', content: remaining });
+    }
+  }
+
+  // If no segments were found (no media), return single text segment
+  if (segments.length === 0) {
+    return [{ type: 'text', content }];
+  }
+
+  return segments;
+}
+
+/**
+ * Renders message content with media support.
+ * Parses the content for data URLs and renders them as proper
+ * MediaImage / MediaAudio components alongside markdown text.
+ */
+function MediaContent({ content }: { content: string }) {
+  const segments = useMemo(() => parseMediaSegments(content), [content]);
+
+  return (
+    <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
+      {segments.map((seg, i) => {
+        if (seg.type === 'image') {
+          return <MediaImage key={`img-${i}`} src={seg.content} alt="Generated image" />;
+        }
+        if (seg.type === 'audio') {
+          return <MediaAudio key={`audio-${i}`} src={seg.content} />;
+        }
+        // Text segment — render with ReactMarkdown
+        return <ReactMarkdown key={`text-${i}`}>{seg.content || ' '}</ReactMarkdown>;
+      })}
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════
    MESSAGE BUBBLE
    ═════════════════════════════════════════════════════ */
 
@@ -416,9 +545,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 <p className="whitespace-pre-wrap">{message.content}</p>
               </>
             ) : (
-              <div className="markdown-content prose prose-sm max-w-none dark:prose-invert">
-                <ReactMarkdown>{message.content || ' '}</ReactMarkdown>
-              </div>
+              <MediaContent content={message.content || ' '} />
             )}
             {/* Streaming cursor with smooth fade-out on completion */}
             {!isUser && (

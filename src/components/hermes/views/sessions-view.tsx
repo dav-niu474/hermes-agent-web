@@ -113,6 +113,8 @@ export function SessionsView() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportingAll, setExportingAll] = useState(false);
 
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
@@ -225,6 +227,114 @@ export function SessionsView() {
   };
 
   // -----------------------------------------------------------------------
+  // Export helpers
+  // -----------------------------------------------------------------------
+
+  const sanitizeFilename = (text: string): string =>
+    text
+      .replace(/[^a-zA-Z0-9\s-_]/g, '')
+      .replace(/\s+/g, '-')
+      .slice(0, 60) || 'untitled';
+
+  const triggerDownload = (json: string, filename: string) => {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSingleSession = useCallback(
+    async (session: Session) => {
+      setExportingId(session.id);
+      try {
+        const res = await fetch(`/api/sessions/${session.id}`);
+        if (!res.ok) throw new Error(`Failed to fetch session (${res.status})`);
+        const data = await res.json();
+
+        const exportPayload = {
+          exportedAt: new Date().toISOString(),
+          sessionId: data.id,
+          title: data.title,
+          model: data.model,
+          messageCount: data.messages.length,
+          messages: data.messages.map((m: Record<string, unknown>) => ({
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt,
+            ...(m.tokens != null && { tokens: m.tokens }),
+            ...(m.duration != null && { duration: m.duration }),
+          })),
+        };
+
+        const dateStr = format(new Date(session.updatedAt), 'yyyy-MM-dd');
+        const filename = `session-${sanitizeFilename(session.title)}-${dateStr}.json`;
+        triggerDownload(JSON.stringify(exportPayload, null, 2), filename);
+        toast.success(`Exported "${session.title}"`);
+      } catch (err) {
+        console.error('[SessionsView] export error:', err);
+        toast.error('Failed to export session');
+      } finally {
+        setExportingId(null);
+      }
+    },
+    [],
+  );
+
+  const exportAllSessions = useCallback(async () => {
+    if (filtered.length === 0) {
+      toast.info('No sessions to export');
+      return;
+    }
+    setExportingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        filtered.map(async (session) => {
+          const res = await fetch(`/api/sessions/${session.id}`);
+          if (!res.ok) throw new Error(`Failed for ${session.id}`);
+          const data = await res.json();
+          return {
+            exportedAt: new Date().toISOString(),
+            sessionId: data.id,
+            title: data.title,
+            model: data.model,
+            messageCount: data.messages.length,
+            messages: data.messages.map((m: Record<string, unknown>) => ({
+              role: m.role,
+              content: m.content,
+              createdAt: m.createdAt,
+              ...(m.tokens != null && { tokens: m.tokens }),
+              ...(m.duration != null && { duration: m.duration }),
+            })),
+          };
+        }),
+      );
+
+      const successes = results.filter((r) => r.status === 'fulfilled').map((r) => (r as PromiseFulfilledResult<unknown>).value);
+      const failures = results.filter((r) => r.status === 'rejected').length;
+
+      if (successes.length === 0) {
+        toast.error('Failed to export any sessions');
+        return;
+      }
+
+      const dateStr = format(new Date(), 'yyyy-MM-dd');
+      const filename = `sessions-export-${dateStr}.json`;
+      triggerDownload(JSON.stringify(successes, null, 2), filename);
+      toast.success(`Exported ${successes.length} session${successes.length !== 1 ? 's' : ''}${failures > 0 ? ` (${failures} failed)` : ''}`);
+    } catch (err) {
+      console.error('[SessionsView] export-all error:', err);
+      toast.error('Failed to export sessions');
+    } finally {
+      setExportingAll(false);
+    }
+  }, [filtered]);
+
+  // -----------------------------------------------------------------------
   // Relative time helper
   // -----------------------------------------------------------------------
 
@@ -301,6 +411,25 @@ export function SessionsView() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportAllSessions}
+                  disabled={exportingAll || loading || filtered.length === 0}
+                  className="h-8 text-xs"
+                >
+                  {exportingAll ? (
+                    <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5 mr-1.5" />
+                  )}
+                  Export All
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export all filtered sessions as JSON</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -447,10 +576,16 @@ export function SessionsView() {
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toast.info('Export JSON — Coming soon');
+                                exportSingleSession(session);
                               }}
+                              disabled={exportingId === session.id}
                             >
-                              <Download className="size-3.5" /> Export JSON
+                              {exportingId === session.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Download className="size-3.5" />
+                              )}
+                              {exportingId === session.id ? 'Exporting…' : 'Export JSON'}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"

@@ -425,21 +425,22 @@ export class AgentLoop {
     // Extract user task for context
     const userTask = this.extractUserTask(workingMessages);
 
-    // Prefetch memory context once
-    let memoryBlock = "";
-    if (this.memoryManager) {
-      try {
-        memoryBlock = await this.memoryManager.getMemoryContext(userTask);
-      } catch {
-        // Memory failure is non-fatal
-      }
-    }
-
     // Main loop
     while (this.budget.remaining > 0) {
       if (!this.budget.consume()) break;
 
       apiCallCount += 1;
+
+      // Re-fetch memory context each iteration so that dynamic content
+      // (e.g. activated skills injected by ToolRegistryAdapter) is picked up.
+      let memoryBlock = "";
+      if (this.memoryManager) {
+        try {
+          memoryBlock = await this.memoryManager.getMemoryContext(userTask);
+        } catch {
+          // Memory failure is non-fatal
+        }
+      }
 
       // Assemble API messages
       const apiMessages = this.prepareApiMessages(

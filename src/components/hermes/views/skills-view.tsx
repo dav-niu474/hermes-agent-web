@@ -28,11 +28,15 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  Film,
+  Gamepad2,
+  Package,
   type LucideIcon,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -88,32 +92,148 @@ interface SkillsApiResponse {
   categories: string[];
 }
 
-// ─── Icon mapping for categories ──────────────────────────────────────────────
+// ─── Category configuration (matching spec colors) ───────────────────────────
 
-const CATEGORY_ICON_MAP: Record<string, { icon: LucideIcon; color: string; bgColor: string }> = {
-  'software-development': { icon: Code, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
-  'creative': { icon: Palette, color: 'text-rose-500', bgColor: 'bg-rose-500/10' },
-  'research': { icon: BookOpen, color: 'text-amber-500', bgColor: 'bg-amber-500/10' },
-  'productivity': { icon: Briefcase, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
-  'devops': { icon: Server, color: 'text-teal-500', bgColor: 'bg-teal-500/10' },
-  'autonomous-ai-agents': { icon: Bot, color: 'text-violet-500', bgColor: 'bg-violet-500/10' },
-  'smart-home': { icon: Home, color: 'text-lime-500', bgColor: 'bg-lime-500/10' },
-  'communication': { icon: MessageCircle, color: 'text-sky-500', bgColor: 'bg-sky-500/10' },
-  'security': { icon: Shield, color: 'text-red-500', bgColor: 'bg-red-500/10' },
-  'mlops': { icon: Server, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
-  'data-science': { icon: TrendingUp, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
-  'general': { icon: Layers, color: 'text-muted-foreground', bgColor: 'bg-muted' },
+const CATEGORY_CONFIG: Record<
+  string,
+  { icon: LucideIcon; color: string; bgColor: string }
+> = {
+  'software-development': {
+    icon: Code,
+    color: 'text-emerald-500',
+    bgColor: 'bg-emerald-500/10',
+  },
+  creative: {
+    icon: Palette,
+    color: 'text-rose-500',
+    bgColor: 'bg-rose-500/10',
+  },
+  productivity: {
+    icon: Briefcase,
+    color: 'text-amber-500',
+    bgColor: 'bg-amber-500/10',
+  },
+  mlops: {
+    icon: Server,
+    color: 'text-teal-500',
+    bgColor: 'bg-teal-500/10',
+  },
+  research: {
+    icon: BookOpen,
+    color: 'text-violet-500',
+    bgColor: 'bg-violet-500/10',
+  },
+  media: {
+    icon: Film,
+    color: 'text-orange-500',
+    bgColor: 'bg-orange-500/10',
+  },
+  'autonomous-agents': {
+    icon: Bot,
+    color: 'text-fuchsia-500',
+    bgColor: 'bg-fuchsia-500/10',
+  },
+  gaming: {
+    icon: Gamepad2,
+    color: 'text-lime-500',
+    bgColor: 'bg-lime-500/10',
+  },
+  misc: {
+    icon: Package,
+    color: 'text-sky-500',
+    bgColor: 'bg-sky-500/10',
+  },
+  devops: {
+    icon: Server,
+    color: 'text-teal-500',
+    bgColor: 'bg-teal-500/10',
+  },
+  'smart-home': {
+    icon: Home,
+    color: 'text-lime-500',
+    bgColor: 'bg-lime-500/10',
+  },
+  communication: {
+    icon: MessageCircle,
+    color: 'text-sky-500',
+    bgColor: 'bg-sky-500/10',
+  },
+  security: {
+    icon: Shield,
+    color: 'text-red-500',
+    bgColor: 'bg-red-500/10',
+  },
+  'data-science': {
+    icon: TrendingUp,
+    color: 'text-cyan-500',
+    bgColor: 'bg-cyan-500/10',
+  },
+  general: {
+    icon: Layers,
+    color: 'text-muted-foreground',
+    bgColor: 'bg-muted',
+  },
 };
 
-function getCategoryInfo(catId: string | null): { icon: LucideIcon; color: string; bgColor: string; name: string } {
+function getCategoryInfo(
+  catId: string | null,
+): {
+  icon: LucideIcon;
+  color: string;
+  bgColor: string;
+  name: string;
+} {
   if (!catId) {
-    return { icon: Layers, color: 'text-muted-foreground', bgColor: 'bg-muted', name: 'General' };
+    return {
+      icon: Layers,
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted',
+      name: 'General',
+    };
   }
-  const mapped = CATEGORY_ICON_MAP[catId];
+  const mapped = CATEGORY_CONFIG[catId];
   if (mapped) {
-    return { ...mapped, name: catId.charAt(0).toUpperCase() + catId.slice(1).replace(/-/g, ' ') };
+    return {
+      ...mapped,
+      name: catId.charAt(0).toUpperCase() + catId.slice(1).replace(/-/g, ' '),
+    };
   }
-  return { icon: Layers, color: 'text-muted-foreground', bgColor: 'bg-muted', name: catId };
+  return {
+    icon: Layers,
+    color: 'text-muted-foreground',
+    bgColor: 'bg-muted',
+    name: catId.charAt(0).toUpperCase() + catId.slice(1).replace(/-/g, ' '),
+  };
+}
+
+// ─── Minimal markdown → HTML ─────────────────────────────────────────────────
+
+function simpleMarkdown(md: string): string {
+  return md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(
+      /^### (.+)$/gm,
+      '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>',
+    )
+    .replace(
+      /^## (.+)$/gm,
+      '<h2 class="text-base font-semibold mt-4 mb-1.5">$1</h2>',
+    )
+    .replace(
+      /^# (.+)$/gm,
+      '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>',
+    )
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(
+      /`([^`]+)`/g,
+      '<code class="px-1 py-0.5 rounded bg-muted text-xs font-mono">$1</code>',
+    )
+    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
+    .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal text-sm">$1</li>')
+    .replace(/\n/g, '<br />');
 }
 
 // ─── Skill Content Viewer Dialog ─────────────────────────────────────────────
@@ -144,7 +264,9 @@ function SkillContentDialog({
         })
         .catch((err) => {
           console.error('Failed to load skill content:', err);
-          setContent('Failed to load skill content. The skill may not have a SKILL.md file.');
+          setContent(
+            'Failed to load skill content. The skill may not have a SKILL.md file.',
+          );
         })
         .finally(() => setLoading(false));
     }
@@ -153,7 +275,6 @@ function SkillContentDialog({
   if (!skill) return null;
   const catInfo = getCategoryInfo(skill.category);
 
-  // Split YAML frontmatter from body
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   const frontmatter = frontmatterMatch ? frontmatterMatch[1].trim() : '';
   const body = frontmatterMatch ? frontmatterMatch[2].trim() : content;
@@ -170,16 +291,24 @@ function SkillContentDialog({
               <DialogTitle className="text-base flex items-center gap-2">
                 {skill.name}
                 {skill.isBuiltin ? (
-                  <Badge variant="outline" className="text-[10px] gap-0.5 font-normal">
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] gap-0.5 font-normal"
+                  >
                     <Star className="size-2.5" /> Built-in
                   </Badge>
                 ) : (
-                  <Badge variant="outline" className="text-[10px] gap-0.5 font-normal text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] gap-0.5 font-normal text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
+                  >
                     <Sparkles className="size-2.5" /> Custom
                   </Badge>
                 )}
               </DialogTitle>
-              <DialogDescription className="mt-1">{skill.description}</DialogDescription>
+              <DialogDescription className="mt-1">
+                {skill.description}
+              </DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -188,12 +317,13 @@ function SkillContentDialog({
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-sm text-muted-foreground">Loading skill content...</span>
+              <span className="ml-2 text-sm text-muted-foreground">
+                Loading skill content...
+              </span>
             </div>
           ) : (
             <ScrollArea className="h-full max-h-[50vh]">
               <div className="space-y-3 pr-4">
-                {/* Frontmatter */}
                 {frontmatter && (
                   <div>
                     <button
@@ -202,7 +332,11 @@ function SkillContentDialog({
                     >
                       <FileText className="size-3" />
                       <span>Metadata (YAML Frontmatter)</span>
-                      {expanded ? <ChevronUp className="size-3 ml-auto" /> : <ChevronDown className="size-3 ml-auto" />}
+                      {expanded ? (
+                        <ChevronUp className="size-3 ml-auto" />
+                      ) : (
+                        <ChevronDown className="size-3 ml-auto" />
+                      )}
                     </button>
                     <AnimatePresence>
                       {expanded && (
@@ -222,7 +356,6 @@ function SkillContentDialog({
                   </div>
                 )}
 
-                {/* Skill content body */}
                 {body && (
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <div
@@ -234,10 +367,11 @@ function SkillContentDialog({
                   </div>
                 )}
 
-                {/* Tags */}
                 {skill.tags && skill.tags.length > 0 && (
                   <div className="pt-2 border-t border-border/60">
-                    <span className="text-xs font-medium text-muted-foreground mb-1.5 block">Tags</span>
+                    <span className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                      Tags
+                    </span>
                     <div className="flex flex-wrap gap-1.5">
                       {skill.tags.map((tag) => (
                         <Badge key={tag} variant="secondary" className="text-xs">
@@ -260,29 +394,6 @@ function SkillContentDialog({
   );
 }
 
-/** Minimal markdown → HTML (headers, bold, italic, code, lists) */
-function simpleMarkdown(md: string): string {
-  return md
-    // Escape HTML
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    // Headers
-    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold mt-4 mb-1.5">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Italic
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-muted text-xs font-mono">$1</code>')
-    // Unordered lists
-    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
-    // Ordered lists
-    .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal text-sm">$1</li>')
-    // Line breaks
-    .replace(/\n/g, '<br />');
-}
-
 // ─── Skill Detail Dialog (Quick Info) ────────────────────────────────────────
 
 function SkillDetailDialog({
@@ -292,6 +403,7 @@ function SkillDetailDialog({
   onViewContent,
   onEdit,
   onDelete,
+  onToggle,
 }: {
   skill: Skill | null;
   open: boolean;
@@ -299,9 +411,11 @@ function SkillDetailDialog({
   onViewContent: (skill: Skill) => void;
   onEdit: (skill: Skill) => void;
   onDelete: (skill: Skill) => void;
+  onToggle: (skill: Skill) => void;
 }) {
   if (!skill) return null;
   const catInfo = getCategoryInfo(skill.category);
+  const isEnabled = skill.status === 'active';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -314,7 +428,9 @@ function SkillDetailDialog({
             <div className="flex-1 min-w-0">
               <DialogTitle className="text-base">{skill.name}</DialogTitle>
               <DialogDescription className="flex items-center gap-2 mt-1 flex-wrap">
-                <Badge variant="secondary" className="text-xs">{catInfo.name}</Badge>
+                <Badge variant="secondary" className="text-xs">
+                  {catInfo.name}
+                </Badge>
                 {skill.isBuiltin ? (
                   <Badge variant="outline" className="text-xs gap-1">
                     <Star className="size-2.5" /> Built-in
@@ -324,6 +440,23 @@ function SkillDetailDialog({
                     <Sparkles className="size-2.5" /> Custom
                   </Badge>
                 )}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-xs gap-1',
+                    isEnabled
+                      ? 'text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'size-1.5 rounded-full',
+                      isEnabled ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                    )}
+                  />
+                  {isEnabled ? 'Active' : 'Disabled'}
+                </Badge>
               </DialogDescription>
             </div>
           </div>
@@ -331,13 +464,34 @@ function SkillDetailDialog({
 
         <div className="space-y-4">
           <div>
-            <h4 className="text-sm font-medium text-foreground mb-1.5">Description</h4>
-            <p className="text-sm text-muted-foreground leading-relaxed">{skill.description}</p>
+            <h4 className="text-sm font-medium text-foreground mb-1.5">
+              Description
+            </h4>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {skill.description}
+            </p>
+          </div>
+
+          {/* Enable / Disable toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+            <div className="flex items-center gap-2">
+              <Zap className={cn('size-4', isEnabled ? 'text-emerald-500' : 'text-muted-foreground/50')} />
+              <Label htmlFor="skill-toggle-detail" className="text-sm">
+                {isEnabled ? 'Skill is active' : 'Skill is disabled'}
+              </Label>
+            </div>
+            <Switch
+              id="skill-toggle-detail"
+              checked={isEnabled}
+              onCheckedChange={() => onToggle(skill)}
+            />
           </div>
 
           {skill.tags && skill.tags.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-foreground mb-1.5">Tags</h4>
+              <h4 className="text-sm font-medium text-foreground mb-1.5">
+                Tags
+              </h4>
               <div className="flex flex-wrap gap-1.5">
                 {skill.tags.map((tag) => (
                   <Badge key={tag} variant="secondary" className="text-xs">
@@ -350,10 +504,16 @@ function SkillDetailDialog({
 
           {skill.platforms && skill.platforms.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-foreground mb-1.5">Platforms</h4>
+              <h4 className="text-sm font-medium text-foreground mb-1.5">
+                Platforms
+              </h4>
               <div className="flex flex-wrap gap-1.5">
                 {skill.platforms.map((p) => (
-                  <Badge key={p} variant="outline" className="text-xs font-mono">
+                  <Badge
+                    key={p}
+                    variant="outline"
+                    className="text-xs font-mono"
+                  >
                     {p}
                   </Badge>
                 ))}
@@ -366,19 +526,32 @@ function SkillDetailDialog({
           {!skill.isBuiltin && (
             <Button
               variant="destructive"
-              onClick={() => { onOpenChange(false); onDelete(skill); }}
+              onClick={() => {
+                onOpenChange(false);
+                onDelete(skill);
+              }}
               className="gap-1.5"
             >
               <Trash2 className="size-3.5" /> Delete
             </Button>
           )}
-          <Button variant="outline" onClick={() => { onOpenChange(false); onEdit(skill); }}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              onOpenChange(false);
+              onEdit(skill);
+            }}
+          >
             <Pencil className="size-3.5" /> Edit
           </Button>
-          <Button onClick={() => { onOpenChange(false); onViewContent(skill); }}>
+          <Button
+            onClick={() => {
+              onOpenChange(false);
+              onViewContent(skill);
+            }}
+          >
             <FileText className="size-3.5" /> View SKILL.md
           </Button>
-          <Button onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -397,7 +570,13 @@ function SkillFormDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   editingSkill: Skill | null;
-  onSave: (data: { action: string; name: string; category?: string; description?: string; content?: string }) => void;
+  onSave: (data: {
+    action: string;
+    name: string;
+    category?: string;
+    description?: string;
+    content?: string;
+  }) => void;
   isSaving: boolean;
 }) {
   const [name, setName] = useState('');
@@ -417,7 +596,8 @@ function SkillFormDialog({
       name: name.trim(),
       category,
       description: description.trim(),
-      content: content || `# ${name.trim()}\n\n${description.trim()}`,
+      content:
+        content || `# ${name.trim()}\n\n${description.trim()}`,
     });
     onOpenChange(false);
   };
@@ -428,7 +608,9 @@ function SkillFormDialog({
         setName(editingSkill.name);
         setCategory(editingSkill.category || 'general');
         setDescription(editingSkill.description);
-        setContent(`# ${editingSkill.name}\n\n${editingSkill.description}`);
+        setContent(
+          `# ${editingSkill.name}\n\n${editingSkill.description}`,
+        );
       } else {
         setName('');
         setCategory('');
@@ -443,7 +625,9 @@ function SkillFormDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Edit Skill' : 'Create New Skill'}</DialogTitle>
+          <DialogTitle>
+            {isEditing ? 'Edit Skill' : 'Create New Skill'}
+          </DialogTitle>
           <DialogDescription>
             {isEditing
               ? 'Modify the skill configuration and instructions.'
@@ -453,7 +637,6 @@ function SkillFormDialog({
 
         <ScrollArea className="flex-1 -mx-6 px-6">
           <div className="space-y-4 pb-4">
-            {/* Name */}
             <div className="space-y-2">
               <Label htmlFor="skill-name">
                 Skill Name <span className="text-destructive">*</span>
@@ -466,36 +649,43 @@ function SkillFormDialog({
                 disabled={isEditing}
               />
               {isEditing && (
-                <p className="text-[11px] text-muted-foreground">Skill names cannot be changed after creation.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Skill names cannot be changed after creation.
+                </p>
               )}
             </div>
 
-            {/* Category */}
             <div className="space-y-2">
               <Label htmlFor="skill-category">
                 Category <span className="text-destructive">*</span>
               </Label>
-              <Select value={category} onValueChange={setCategory} disabled={isEditing}>
+              <Select
+                value={category}
+                onValueChange={setCategory}
+                disabled={isEditing}
+              >
                 <SelectTrigger id="skill-category" className="w-full">
                   <SelectValue placeholder="Select a category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(CATEGORY_ICON_MAP).map(([key, val]) => (
+                  {Object.entries(CATEGORY_CONFIG).map(([key, val]) => (
                     <SelectItem key={key} value={key}>
                       <div className="flex items-center gap-2">
                         <val.icon className="size-3.5 text-muted-foreground" />
-                        {key.charAt(0).toUpperCase() + key.slice(1).replace(/-/g, ' ')}
+                        {key.charAt(0).toUpperCase() +
+                          key.slice(1).replace(/-/g, ' ')}
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               {isEditing && (
-                <p className="text-[11px] text-muted-foreground">Category cannot be changed after creation.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Category cannot be changed after creation.
+                </p>
               )}
             </div>
 
-            {/* Description */}
             <div className="space-y-2">
               <Label htmlFor="skill-desc">
                 Description <span className="text-destructive">*</span>
@@ -509,7 +699,6 @@ function SkillFormDialog({
               />
             </div>
 
-            {/* Content / Instructions */}
             <div className="space-y-2">
               <Label htmlFor="skill-content">Instructions (SKILL.md)</Label>
               <Textarea
@@ -521,14 +710,21 @@ function SkillFormDialog({
                 className="font-mono text-xs"
               />
               <p className="text-[11px] text-muted-foreground">
-                YAML frontmatter is optional. These instructions guide the agent when using this skill.
+                YAML frontmatter is optional. These instructions guide the agent
+                when using this skill.
               </p>
             </div>
           </div>
         </ScrollArea>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSaving}
+          >
+            Cancel
+          </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -550,11 +746,13 @@ function SkillCard({
   onView,
   onEdit,
   onReadContent,
+  onToggle,
 }: {
   skill: Skill;
   onView: () => void;
   onEdit: () => void;
   onReadContent: () => void;
+  onToggle: () => void;
 }) {
   const catInfo = getCategoryInfo(skill.category);
   const isEnabled = skill.status === 'active';
@@ -569,7 +767,7 @@ function SkillCard({
       className="group relative"
     >
       <div className="relative rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-border">
-        {/* Top row: icon, badges */}
+        {/* Top row: icon + badges | actions */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className={cn('p-1.5 rounded-lg', catInfo.bgColor)}>
@@ -577,11 +775,17 @@ function SkillCard({
             </div>
             <div className="flex flex-col gap-1">
               {skill.isBuiltin ? (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 font-normal text-muted-foreground">
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 gap-0.5 font-normal text-muted-foreground"
+                >
                   <Star className="size-2.5" /> Built-in
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 font-normal text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 gap-0.5 font-normal text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
+                >
                   <Sparkles className="size-2.5" /> Custom
                 </Badge>
               )}
@@ -597,7 +801,10 @@ function SkillCard({
                     variant="ghost"
                     size="icon"
                     className="size-7 rounded-md"
-                    onClick={(e) => { e.stopPropagation(); onReadContent(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReadContent();
+                    }}
                   >
                     <FileText className="size-3" />
                   </Button>
@@ -611,7 +818,10 @@ function SkillCard({
                       variant="ghost"
                       size="icon"
                       className="size-7 rounded-md"
-                      onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit();
+                      }}
                     >
                       <Pencil className="size-3" />
                     </Button>
@@ -625,7 +835,10 @@ function SkillCard({
                     variant="ghost"
                     size="icon"
                     className="size-7 rounded-md"
-                    onClick={(e) => { e.stopPropagation(); onView(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onView();
+                    }}
                   >
                     <Eye className="size-3" />
                   </Button>
@@ -634,18 +847,33 @@ function SkillCard({
               </Tooltip>
             </div>
 
-            {/* Status indicator */}
-            <div
-              className={cn(
-                'size-2 rounded-full',
-                isEnabled ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-              )}
-            />
+            {/* Enable / Disable toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={onToggle}
+                    className="scale-75 origin-right"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isEnabled ? 'Disable skill' : 'Enable skill'}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
         {/* Name */}
-        <h3 className="text-sm font-semibold text-foreground mb-1 group-hover:text-primary transition-colors leading-snug">
+        <h3
+          className={cn(
+            'text-sm font-semibold mb-1 leading-snug transition-colors',
+            isEnabled
+              ? 'text-foreground group-hover:text-primary'
+              : 'text-muted-foreground',
+          )}
+        >
           {skill.name}
         </h3>
 
@@ -656,13 +884,19 @@ function SkillCard({
 
         {/* Bottom: category + tags */}
         <div className="flex items-center justify-between">
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-medium">
+          <Badge
+            variant="secondary"
+            className="text-[10px] px-1.5 py-0 font-medium"
+          >
             {catInfo.name}
           </Badge>
           {skill.tags && skill.tags.length > 0 && (
             <div className="flex items-center gap-1">
               {skill.tags.slice(0, 2).map((tag) => (
-                <span key={tag} className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                <span
+                  key={tag}
+                  className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded"
+                >
                   {tag}
                 </span>
               ))}
@@ -679,23 +913,54 @@ function SkillCard({
   );
 }
 
-// ─── Loading State ───────────────────────────────────────────────────────────
+// ─── Loading Skeleton State ──────────────────────────────────────────────────
 
 function SkillsLoadingState() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-4 sm:p-6">
-      {Array.from({ length: 12 }).map((_, i) => (
-        <div key={i} className="rounded-xl border border-border/60 bg-card p-4 animate-pulse">
-          <div className="flex items-center justify-between mb-3">
-            <div className="h-8 w-8 bg-muted rounded-lg" />
-            <div className="h-4 bg-muted rounded w-14" />
-          </div>
-          <div className="h-4 bg-muted rounded w-2/3 mb-2" />
-          <div className="h-3 bg-muted rounded w-full mb-1" />
-          <div className="h-3 bg-muted rounded w-3/4 mb-3" />
-          <div className="h-5 bg-muted rounded w-20" />
+    <div className="p-4 sm:p-6">
+      {/* Header skeleton */}
+      <div className="mb-6 space-y-3">
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-9 w-full max-w-md rounded-lg" />
+        <div className="flex gap-1.5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton
+              key={i}
+              className="h-7 w-24 rounded-full"
+            />
+          ))}
         </div>
-      ))}
+      </div>
+
+      {/* Section header */}
+      <div className="flex items-center gap-2 mb-3">
+        <Skeleton className="size-4 rounded" />
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-4 w-6 rounded-full" />
+      </div>
+
+      {/* Card grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-border/60 bg-card p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-7 w-7 rounded-lg" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+              <Skeleton className="h-4 w-9 rounded-full" />
+            </div>
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -713,6 +978,7 @@ export function SkillsView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSkills = useCallback(async () => {
@@ -733,13 +999,15 @@ export function SkillsView() {
       }
     } catch (err) {
       console.error('Failed to fetch skills:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load skills');
+      setError(
+        err instanceof Error ? err.message : 'Failed to load skills',
+      );
     } finally {
       setLoading(false);
     }
   }, [categoryId, search]);
 
-  // Initial load
+  // Initial load — fetch all skills + categories
   useEffect(() => {
     (async () => {
       try {
@@ -751,7 +1019,9 @@ export function SkillsView() {
         setApiCategories(data.categories);
       } catch (err) {
         console.error('Failed to fetch skills:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load skills');
+        setError(
+          err instanceof Error ? err.message : 'Failed to load skills',
+        );
       } finally {
         setLoading(false);
       }
@@ -775,14 +1045,22 @@ export function SkillsView() {
     }
 
     const cats: SkillCategory[] = [
-      { id: 'all', name: 'All Skills', count: skills.length, icon: Layers, color: 'text-foreground', bgColor: 'bg-muted' },
+      {
+        id: 'all',
+        name: 'All Skills',
+        count: skills.length,
+        icon: Layers,
+        color: 'text-foreground',
+        bgColor: 'bg-muted',
+      },
     ];
 
     for (const cat of apiCategories) {
-      const info = CATEGORY_ICON_MAP[cat] || CATEGORY_ICON_MAP['general'];
+      const info = CATEGORY_CONFIG[cat] || CATEGORY_CONFIG['general'];
       cats.push({
         id: cat,
-        name: cat.charAt(0).toUpperCase() + cat.slice(1).replace(/-/g, ' '),
+        name:
+          cat.charAt(0).toUpperCase() + cat.slice(1).replace(/-/g, ' '),
         count: catCounts[cat] || 0,
         icon: info.icon,
         color: info.color,
@@ -793,12 +1071,60 @@ export function SkillsView() {
     return cats;
   }, [skills, apiCategories]);
 
-  // Split skills into builtin and custom
+  // Derived stats
   const builtinSkills = skills.filter((s) => s.isBuiltin);
   const customSkills = skills.filter((s) => !s.isBuiltin);
   const enabledCount = skills.filter((s) => s.status === 'active').length;
+  const disabledCount = skills.filter((s) => s.status === 'disabled').length;
 
-  const handleSave = async (data: { action: string; name: string; category?: string; description?: string; content?: string }) => {
+  // ── Handlers ──
+
+  const handleToggle = async (skill: Skill) => {
+    setToggling(skill.name);
+    const newStatus: Skill['status'] =
+      skill.status === 'active' ? 'disabled' : 'active';
+    try {
+      const res = await fetch('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit',
+          name: skill.name,
+          category: skill.category || 'general',
+          description: skill.description,
+          content: `# ${skill.name}\n\n${skill.description}`,
+          status: newStatus,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res
+          .json()
+          .catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errData.error || 'Failed to toggle skill');
+      }
+
+      toast.success(
+        `"${skill.name}" ${newStatus === 'active' ? 'enabled' : 'disabled'}`,
+      );
+      fetchSkills();
+    } catch (err) {
+      console.error('Failed to toggle skill:', err);
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to toggle skill',
+      );
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  const handleSave = async (data: {
+    action: string;
+    name: string;
+    category?: string;
+    description?: string;
+    content?: string;
+  }) => {
     setSaving(true);
     try {
       const res = await fetch('/api/skills', {
@@ -808,22 +1134,32 @@ export function SkillsView() {
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        const errData = await res
+          .json()
+          .catch(() => ({ error: 'Unknown error' }));
         throw new Error(errData.error || 'Failed to save skill');
       }
 
-      toast.success(`Skill "${data.name}" ${data.action === 'create' ? 'created' : 'updated'} successfully`);
+      toast.success(
+        `Skill "${data.name}" ${data.action === 'create' ? 'created' : 'updated'} successfully`,
+      );
       fetchSkills();
     } catch (err) {
       console.error('Failed to save skill:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to save skill');
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to save skill',
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (skill: Skill) => {
-    if (!confirm(`Are you sure you want to delete the skill "${skill.name}"? This cannot be undone.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to delete the skill "${skill.name}"? This cannot be undone.`,
+      )
+    ) {
       return;
     }
 
@@ -840,7 +1176,9 @@ export function SkillsView() {
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        const errData = await res
+          .json()
+          .catch(() => ({ error: 'Unknown error' }));
         throw new Error(errData.error || 'Failed to delete skill');
       }
 
@@ -848,7 +1186,9 @@ export function SkillsView() {
       fetchSkills();
     } catch (err) {
       console.error('Failed to delete skill:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to delete skill');
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to delete skill',
+      );
     } finally {
       setSaving(false);
     }
@@ -862,19 +1202,38 @@ export function SkillsView() {
     setEditingSkill(skill);
   };
 
+  // ── Render ──
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <header className="shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 sm:px-6 pt-4 pb-4">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-xl font-bold text-foreground tracking-tight">Skills Manager</h1>
+            <h1 className="text-xl font-bold text-foreground tracking-tight">
+              Skills Manager
+            </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               {skills.length} skill{skills.length !== 1 ? 's' : ''} &middot;{' '}
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">{enabledCount} active</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                {enabledCount} active
+              </span>
+              {disabledCount > 0 && (
+                <>
+                  {' '}
+                  &middot;{' '}
+                  <span className="text-muted-foreground font-medium">
+                    {disabledCount} disabled
+                  </span>
+                </>
+              )}
               {customSkills.length > 0 && (
-                <> &middot;{' '}
-                <span className="text-amber-600 dark:text-amber-400 font-medium">{customSkills.length} custom</span>
+                <>
+                  {' '}
+                  &middot;{' '}
+                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                    {customSkills.length} custom
+                  </span>
                 </>
               )}
             </p>
@@ -882,13 +1241,28 @@ export function SkillsView() {
           <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchSkills} disabled={loading}>
-                  <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={fetchSkills}
+                  disabled={loading}
+                >
+                  <RefreshCw
+                    className={cn(
+                      'size-3.5',
+                      loading && 'animate-spin',
+                    )}
+                  />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Refresh</TooltipContent>
             </Tooltip>
-            <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setCreateOpen(true)}
+            >
               <Plus className="size-3.5" />
               <span className="hidden sm:inline">Create Skill</span>
             </Button>
@@ -915,18 +1289,22 @@ export function SkillsView() {
                     <button
                       key={cat.id}
                       onClick={() => setCategoryId(cat.id)}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all duration-150 border ${
+                      className={cn(
+                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all duration-150 border',
                         isActive
                           ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                          : 'bg-background text-muted-foreground border-border/60 hover:bg-muted/60 hover:text-foreground'
-                      }`}
+                          : 'bg-background text-muted-foreground border-border/60 hover:bg-muted/60 hover:text-foreground',
+                      )}
                     >
                       <cat.icon className="size-3" />
                       <span className="hidden sm:inline">{cat.name}</span>
                       <span
-                        className={`ml-0.5 size-4 rounded-full text-[10px] font-semibold flex items-center justify-center ${
-                          isActive ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
-                        }`}
+                        className={cn(
+                          'ml-0.5 size-4 rounded-full text-[10px] font-semibold flex items-center justify-center',
+                          isActive
+                            ? 'bg-primary-foreground/20 text-primary-foreground'
+                            : 'bg-muted text-muted-foreground',
+                        )}
                       >
                         {cat.count}
                       </span>
@@ -948,9 +1326,16 @@ export function SkillsView() {
             <div className="p-3 rounded-full bg-destructive/10 mb-3">
               <AlertTriangle className="size-5 text-destructive" />
             </div>
-            <p className="text-sm font-medium text-foreground">Failed to load skills</p>
+            <p className="text-sm font-medium text-foreground">
+              Failed to load skills
+            </p>
             <p className="text-xs text-muted-foreground mt-1">{error}</p>
-            <Button variant="outline" size="sm" className="mt-4" onClick={fetchSkills}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              onClick={fetchSkills}
+            >
               <RefreshCw className="size-3.5" /> Retry
             </Button>
           </div>
@@ -966,12 +1351,23 @@ export function SkillsView() {
                   <div className="p-3 rounded-full bg-muted/60 mb-3">
                     <Search className="size-5 text-muted-foreground" />
                   </div>
-                  <p className="text-sm font-medium text-foreground">No skills found</p>
+                  <p className="text-sm font-medium text-foreground">
+                    No skills found
+                  </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {search.trim() || categoryId !== 'all'
                       ? 'Try adjusting your search or category filter'
                       : 'No skills have been discovered yet'}
                   </p>
+                  {!search.trim() && categoryId === 'all' && (
+                    <Button
+                      size="sm"
+                      className="mt-4 gap-1.5"
+                      onClick={() => setCreateOpen(true)}
+                    >
+                      <Plus className="size-3.5" /> Create Your First Skill
+                    </Button>
+                  )}
                 </motion.div>
               ) : (
                 <>
@@ -986,6 +1382,19 @@ export function SkillsView() {
                         <Badge variant="secondary" className="text-[10px]">
                           {builtinSkills.length}
                         </Badge>
+                        {builtinSkills.filter(
+                          (s) => s.status === 'active',
+                        ).length !== builtinSkills.length && (
+                          <span className="text-xs text-muted-foreground">
+                            (
+                            {
+                              builtinSkills.filter(
+                                (s) => s.status === 'active',
+                              ).length
+                            }{' '}
+                            active)
+                          </span>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         <AnimatePresence mode="popLayout">
@@ -995,7 +1404,10 @@ export function SkillsView() {
                               skill={skill}
                               onView={() => setViewingSkill(skill)}
                               onEdit={() => setEditingSkill(skill)}
-                              onReadContent={() => handleViewContent(skill)}
+                              onReadContent={() =>
+                                handleViewContent(skill)
+                              }
+                              onToggle={() => handleToggle(skill)}
                             />
                           ))}
                         </AnimatePresence>
@@ -1014,6 +1426,19 @@ export function SkillsView() {
                         <Badge variant="secondary" className="text-[10px]">
                           {customSkills.length}
                         </Badge>
+                        {customSkills.filter(
+                          (s) => s.status === 'active',
+                        ).length !== customSkills.length && (
+                          <span className="text-xs text-muted-foreground">
+                            (
+                            {
+                              customSkills.filter(
+                                (s) => s.status === 'active',
+                              ).length
+                            }{' '}
+                            active)
+                          </span>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         <AnimatePresence mode="popLayout">
@@ -1023,7 +1448,10 @@ export function SkillsView() {
                               skill={skill}
                               onView={() => setViewingSkill(skill)}
                               onEdit={() => setEditingSkill(skill)}
-                              onReadContent={() => handleViewContent(skill)}
+                              onReadContent={() =>
+                                handleViewContent(skill)
+                              }
+                              onToggle={() => handleToggle(skill)}
                             />
                           ))}
                         </AnimatePresence>
@@ -1045,6 +1473,7 @@ export function SkillsView() {
         onViewContent={handleViewContent}
         onEdit={handleEditFromView}
         onDelete={handleDelete}
+        onToggle={handleToggle}
       />
 
       {/* View SKILL.md Content Dialog */}

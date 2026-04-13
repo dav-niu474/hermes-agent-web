@@ -43,6 +43,45 @@ export async function GET(
 }
 
 /**
+ * PATCH /api/sessions/[id]
+ * Update a session (e.g. title).
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const { db } = await import("@/lib/db");
+
+    const data: Record<string, unknown> = {};
+    if (typeof body.title === "string" && body.title.trim()) {
+      data.title = body.title.trim().slice(0, 100);
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    const session = await db.chatSession.update({
+      where: { id },
+      data,
+    });
+
+    return NextResponse.json({
+      id: session.id,
+      title: session.title,
+      model: session.model,
+      updatedAt: session.updatedAt,
+    });
+  } catch (error) {
+    console.error("[Session API] PATCH error:", error);
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+  }
+}
+
+/**
  * DELETE /api/sessions/[id]
  * Delete a session and all its messages.
  */

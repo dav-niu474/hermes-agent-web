@@ -505,12 +505,16 @@ All Python modules rewritten in TypeScript and production-ready in `src/lib/herm
 - [x] 8 frontend views (Chat, Dashboard, Tools, Skills, Sessions, Memory, Settings, Cronjobs)
 - [x] Settings with 5 tabs (General, Model, Terminal, Memory, Advanced)
 
-### 🔲 Phase 2: Enhanced Skills & Memory
+### ✅ Phase 2: Enhanced Skills & Memory (Complete)
 
-- [ ] Skills Hub sync — Pull community skills from upstream
-- [ ] Skill activation — Load skill instructions into system prompt on demand
-- [ ] Session title auto-generation
-- [ ] Session export (JSON)
+- [x] Skills Hub sync — Pull community skills from upstream
+- [x] Skill activation — Load skill instructions into system prompt on demand
+- [x] Session title auto-generation (LLM-powered, non-blocking)
+- [x] Session export (JSON download, single + bulk)
+- [x] Skills View — Real API data with dynamic categories
+- [x] Todo tool — Session-scoped persistent state
+- [x] TTS tool — Real z-ai-web-dev-sdk handler
+- [x] Image/Audio display — Inline rendering in chat messages
 
 ### 🔲 Phase 3: Code & Terminal Execution
 

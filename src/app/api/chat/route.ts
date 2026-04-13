@@ -37,11 +37,67 @@ interface ChatRequest {
   provider?: string;
 }
 
-/** Generate a concise title from the first user message. */
-function generateTitle(content: string): string {
+/** Generate a simple fallback title from the first user message. */
+function generateFallbackTitle(content: string): string {
   const cleaned = content.replace(/\n/g, " ").trim();
   if (cleaned.length <= 50) return cleaned;
   return cleaned.slice(0, 47) + "...";
+}
+
+/**
+ * Generate a better title using LLM in the background.
+ * Fire-and-forget — failures are silently swallowed so chat is never blocked.
+ * Updates the session title in DB when the LLM responds.
+ */
+async function generateTitleWithLLM(
+  content: string,
+  sessionId: string,
+  llmConfig: { model: string; provider: string; baseUrl: string; apiKey: string; apiMode: string },
+): Promise<void> {
+  try {
+    // Truncate input to keep prompt small and cost-effective
+    const inputSnippet = content.replace(/\n/g, " ").trim().slice(0, 300);
+
+    const client = new OpenAI({
+      apiKey: llmConfig.apiKey,
+      baseURL: llmConfig.baseUrl,
+    });
+
+    const completion = await client.chat.completions.create({
+      model: llmConfig.model,
+      max_tokens: 30,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate a very short title (max 6 words) for a chat that starts with this message. Just output the title, nothing else. No quotes, no punctuation at the end.",
+        },
+        {
+          role: "user",
+          content: inputSnippet,
+        },
+      ],
+    });
+
+    let title = completion.choices?.[0]?.message?.content?.trim() ?? "";
+    // Strip surrounding quotes if the LLM added them
+    title = title.replace(/^["'「」『』]|[,."]+$/g, "").trim();
+    // Enforce max ~50 characters
+    if (title.length > 50) {
+      title = title.slice(0, 47) + "...";
+    }
+
+    if (title) {
+      await db.chatSession
+        .update({ where: { id: sessionId }, data: { title } })
+        .catch(() => {});
+      console.log(`[SmartTitle] Updated session ${sessionId} title to: "${title}"`);
+    }
+  } catch (err) {
+    // Silently swallow — never block the chat
+    console.warn("[SmartTitle] LLM title generation error:", err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,9 +139,15 @@ async function getZAI() {
 // ToolRegistryAdapter — wraps static tool definitions for AgentLoop
 // ---------------------------------------------------------------------------
 
+const MAX_ACTIVATED_SKILLS_CHARS = 3000;
+
 class ToolRegistryAdapter implements ToolRegistryInterface {
   private toolNames: Set<string>;
   private toolSchemas: OpenAI.ChatCompletionTool[];
+  /** Skills that have been activated via skill_view — name → full content */
+  private activatedSkills: Map<string, string> = new Map();
+  /** Session-scoped todo state — sessionId → task list */
+  private todoStore = new Map<string, Array<{id: string; content: string; status: string}>>();
 
   constructor(toolNames: string[]) {
     // Only include tools that are actually executable in the web context
@@ -146,6 +208,8 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
           return await this.handleMemory(args);
         case "session_search":
           return await this.handleSessionSearch(args);
+        case "todo":
+          return this.handleTodo(args, _context);
         case "clarify":
           return this.handleClarify(args);
         default:
@@ -349,6 +413,25 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
       });
     }
 
+    // Activate this skill — inject full instructions into the system prompt
+    // for subsequent LLM turns (deduplicated, with total size limit).
+    if (!this.activatedSkills.has(skillName)) {
+      const currentTotal = Array.from(this.activatedSkills.values()).reduce(
+        (sum, c) => sum + c.length,
+        0,
+      );
+      if (currentTotal + result.content.length <= MAX_ACTIVATED_SKILLS_CHARS) {
+        this.activatedSkills.set(skillName, result.content);
+        console.log(
+          `[SkillActivation] Activated skill '${skillName}' (${result.content.length} chars, total now ${currentTotal + result.content.length}/${MAX_ACTIVATED_SKILLS_CHARS})`,
+        );
+      } else {
+        console.log(
+          `[SkillActivation] Skipped activation of '${skillName}' — would exceed ${MAX_ACTIVATED_SKILLS_CHARS} char limit (current: ${currentTotal})`,
+        );
+      }
+    }
+
     if (filePath) {
       return JSON.stringify({
         name: skillName,
@@ -367,6 +450,23 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         size: f.size,
       })),
     });
+  }
+
+  /**
+   * Return the formatted `<active-skills>` block for injection into the
+   * memory/system prompt. Returns an empty string when no skills are active.
+   */
+  getActivatedSkillsPrompt(): string {
+    if (this.activatedSkills.size === 0) return "";
+
+    const sections: string[] = ["<active-skills>"];
+    for (const [name, content] of this.activatedSkills) {
+      sections.push(`## Skill: ${name}`);
+      sections.push(content);
+      sections.push("");
+    }
+    sections.push("</active-skills>");
+    return sections.join("\n");
   }
 
   private async handleSkillManage(args: Record<string, unknown>): Promise<string> {
@@ -502,6 +602,70 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     });
   }
 
+  private handleTodo(args: Record<string, unknown>, context: ToolContext): string {
+    const sessionId = context.sessionId || 'default';
+    const todos = args.todos;
+    const merge = args.merge === true;
+
+    // If no todos array provided, return current list for this session
+    if (!todos || !Array.isArray(todos)) {
+      const current = this.todoStore.get(sessionId) || [];
+      return JSON.stringify({
+        todos: current,
+        total: current.length,
+        inProgress: current.filter((t) => t.status === 'in_progress').length,
+        completed: current.filter((t) => t.status === 'completed').length,
+        pending: current.filter((t) => t.status === 'pending').length,
+        message: current.length > 0
+          ? `Current task list: ${current.length} items.`
+          : 'No active tasks. Provide todos array to create/update tasks.',
+      });
+    }
+
+    // Validate incoming items
+    const validStatuses = ['pending', 'in_progress', 'completed', 'cancelled'];
+    const incoming = todos.map((item: any) => ({
+      id: String(item.id || ''),
+      content: String(item.content || ''),
+      status: validStatuses.includes(item.status) ? item.status : 'pending',
+    }));
+
+    if (merge) {
+      // Merge mode: update existing items by ID, add new ones, keep unmentioned ones
+      const existing = this.todoStore.get(sessionId) || [];
+      const existingMap = new Map(existing.map((t) => [t.id, t]));
+
+      // Update or add incoming items
+      for (const item of incoming) {
+        existingMap.set(item.id, item);
+      }
+
+      const merged = Array.from(existingMap.values());
+      this.todoStore.set(sessionId, merged);
+
+      return JSON.stringify({
+        todos: merged,
+        total: merged.length,
+        inProgress: merged.filter((t) => t.status === 'in_progress').length,
+        completed: merged.filter((t) => t.status === 'completed').length,
+        pending: merged.filter((t) => t.status === 'pending').length,
+        message: `Task list merged: ${merged.length} items (${incoming.length} updated/added).`,
+      });
+    } else {
+      // Replace mode: replace entire list
+      this.todoStore.set(sessionId, incoming);
+
+      return JSON.stringify({
+        todos: incoming,
+        total: incoming.length,
+        inProgress: incoming.filter((t) => t.status === 'in_progress').length,
+        completed: incoming.filter((t) => t.status === 'completed').length,
+        pending: incoming.filter((t) => t.status === 'pending').length,
+        message: `Task list updated: ${incoming.length} items (replaced).`,
+      });
+    }
+  }
+
   private handleClarify(args: Record<string, unknown>): Promise<string> {
     const question = String(args.question ?? "Could you clarify what you mean?");
     return JSON.stringify({
@@ -517,17 +681,31 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
 
 class MemoryManagerAdapter implements MemoryManagerInterface {
   private mm: MemoryManager;
+  private toolRegistry: ToolRegistryAdapter;
 
-  constructor(mm: MemoryManager) {
+  constructor(mm: MemoryManager, toolRegistry: ToolRegistryAdapter) {
     this.mm = mm;
+    this.toolRegistry = toolRegistry;
   }
 
   async getMemoryContext(query?: string): Promise<string> {
+    const parts: string[] = [];
+
+    // Standard memory context
     try {
-      return await this.mm.buildMemoryContextBlock(query);
+      const memoryCtx = await this.mm.buildMemoryContextBlock(query);
+      if (memoryCtx) parts.push(memoryCtx);
     } catch {
-      return "";
+      // Memory failure is non-fatal
     }
+
+    // Activated skills — dynamically injected after skill_view calls
+    const activeSkillsPrompt = this.toolRegistry.getActivatedSkillsPrompt();
+    if (activeSkillsPrompt) {
+      parts.push(activeSkillsPrompt);
+    }
+
+    return parts.join("\n\n");
   }
 }
 
@@ -593,9 +771,12 @@ export async function POST(request: NextRequest) {
       if (!session) localSessionId = undefined;
     }
 
+    // Track whether this is a brand-new session (for smart title generation)
+    const isNewSession = !localSessionId;
+
     // ── Create local session if needed ──
     if (!localSessionId) {
-      const title = generateTitle(lastMessage.content);
+      const title = generateFallbackTitle(lastMessage.content);
       const newSession = await db.chatSession
         .create({
           data: {
@@ -627,6 +808,13 @@ export async function POST(request: NextRequest) {
         ` baseUrl=${llmConfig.baseUrl} hasKey=${!!llmConfig.apiKey}`,
     );
 
+    // ── Generate smart title for new sessions (fire-and-forget) ──
+    if (isNewSession && localSessionId) {
+      generateTitleWithLLM(lastMessage.content, localSessionId, llmConfig).catch((err) => {
+        console.warn("[SmartTitle] Background title generation failed:", err);
+      });
+    }
+
     // ── Resolve toolset tools ──
     const toolsetFilter = getToolsetFilter();
     const toolNames: string[] = [];
@@ -640,7 +828,7 @@ export async function POST(request: NextRequest) {
     // ── Build components ──
     const toolRegistry = new ToolRegistryAdapter(toolNames);
     const memoryManager = new MemoryManager();
-    const memoryAdapter = new MemoryManagerAdapter(memoryManager);
+    const memoryAdapter = new MemoryManagerAdapter(memoryManager, toolRegistry);
 
     // ── Load skills system prompt ──
     let skillsPrompt = "";
@@ -748,6 +936,7 @@ export async function POST(request: NextRequest) {
         let fullContent = "";
         let totalInputTokens = 0;
         let totalOutputTokens = 0;
+        let toolEventCounter = 0;
 
         try {
           const result = await agentLoop.run(agentMessages, {
@@ -802,7 +991,7 @@ export async function POST(request: NextRequest) {
                     : "";
                   const toolId = typeof toolData === "object" && toolData && "id" in toolData
                     ? String((toolData as Record<string, unknown>).id)
-                    : `tool-${Date.now()}-${i}`;
+                    : `tool-${Date.now()}-${toolEventCounter++}`;
                   writeSSE(
                     JSON.stringify({
                       id: completionId,
@@ -826,7 +1015,7 @@ export async function POST(request: NextRequest) {
                     : "";
                   const toolId2 = typeof event.data === "object" && event.data && "id" in event.data
                     ? String((event.data as Record<string, unknown>).id)
-                    : `tool-end-${Date.now()}-${i}`;
+                    : `tool-end-${Date.now()}-${toolEventCounter++}`;
                   writeSSE(
                     JSON.stringify({
                       id: completionId,
