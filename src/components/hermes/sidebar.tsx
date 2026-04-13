@@ -15,6 +15,7 @@ import {
   Moon,
   Menu,
   PanelLeftClose,
+  Plus,
   MessageSquarePlus,
   MoreHorizontal,
   Trash2,
@@ -72,7 +73,6 @@ const navItems: NavItem[] = [
   { id: 'memory', label: 'Memory', icon: Brain, emoji: '🧠' },
   { id: 'settings', label: 'Settings', icon: Settings, emoji: '⚙️' },
   { id: 'cronjobs', label: 'Cron Jobs', icon: Clock, emoji: '⏰' },
-  { id: 'newchat', label: 'New Chat', icon: MessageSquarePlus, emoji: '✨' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -326,9 +326,9 @@ function SidebarNavItem({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Session History Section (recent sessions list only, no New Chat)   */
+/*  Chat History Section (New Chat button + Recent Sessions list)       */
 /* ------------------------------------------------------------------ */
-function SessionHistorySection({
+function ChatHistorySection({
   collapsed,
   onNavigate,
 }: {
@@ -380,6 +380,15 @@ function SessionHistorySection({
     window.addEventListener('hermes:refresh-sessions', handler);
     return () => window.removeEventListener('hermes:refresh-sessions', handler);
   }, [fetchSessions]);
+
+  const handleNewChat = () => {
+    clearMessages();
+    setCurrentSessionId(null);
+    if (currentView !== 'chat') {
+      setCurrentView('chat');
+    }
+    onNavigate?.('chat');
+  };
 
   const handleSelectSession = async (id: string) => {
     if (loadingSession || id === currentSessionId) {
@@ -449,11 +458,34 @@ function SessionHistorySection({
   };
 
   if (collapsed) {
-    return null;
+    return (
+      <div className="py-2 px-2 flex flex-col items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" onClick={handleNewChat}>
+              <MessageSquarePlus className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>New Chat</TooltipContent>
+        </Tooltip>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col max-h-[40vh] min-h-0">
+      {/* New Chat Button */}
+      <div className="px-2 pt-2 pb-1">
+        <Button
+          onClick={handleNewChat}
+          variant="outline"
+          className="w-full gap-2 h-8 text-xs justify-start font-medium"
+        >
+          <Plus className="size-3.5" />
+          New Chat
+        </Button>
+      </div>
+
       {/* Recent Sessions */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-1.5 pb-1 space-y-0.5 min-h-0">
         {sessions.length === 0 ? (
@@ -568,58 +600,19 @@ function SidebarContent({
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 space-y-0.5">
-        {navItems.map((item) => {
-          // Special handling for 'newchat' — it's an action, not a view
-          if (item.id === 'newchat') {
-            return collapsed ? (
-              <Tooltip key="newchat">
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 mx-auto"
-                    onClick={() => {
-                      useAppStore.getState().clearMessages();
-                      useAppStore.getState().setCurrentSessionId(null);
-                      handleSelect('chat');
-                    }}
-                  >
-                    <MessageSquarePlus className="size-[18px]" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>New Chat</TooltipContent>
-              </Tooltip>
-            ) : (
-              <button
-                key="newchat"
-                onClick={() => {
-                  useAppStore.getState().clearMessages();
-                  useAppStore.getState().setCurrentSessionId(null);
-                  handleSelect('chat');
-                }}
-                className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              >
-                <item.icon className="size-[18px] shrink-0 transition-colors text-primary group-hover:text-primary" />
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          }
-          return (
-            <SidebarNavItem
-              key={item.id}
-              item={item}
-              isActive={currentView === item.id}
-              collapsed={collapsed}
-              onSelect={handleSelect}
-            />
-          );
-        })}
+        {navItems.map((item) => (
+          <SidebarNavItem
+            key={item.id}
+            item={item}
+            isActive={currentView === item.id}
+            collapsed={collapsed}
+            onSelect={handleSelect}
+          />
+        ))}
       </nav>
 
-      <Separator />
-
-      {/* Recent Sessions — history list */}
-      <SessionHistorySection collapsed={collapsed} onNavigate={onNavigate} />
+      {/* Chat History — New Chat + Recent Sessions (directly below nav) */}
+      <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
 
       <Separator />
 
