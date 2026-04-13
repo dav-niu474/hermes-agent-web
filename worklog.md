@@ -1047,3 +1047,44 @@ Stage Summary:
 - Jobs loaded from Prisma DB via /api/cronjobs
 - Create/Toggle/Delete operations properly call API and refresh list
 - Null date handling for lastRunAt/nextRunAt fields
+
+---
+Task ID: settings-frontend-backend-integration
+Agent: Main Agent
+Task: Settings功能前后端打通 - 全部配置项从后端加载并保存到后端
+
+Work Log:
+- 审查了 Settings 前端页面现状：5个 Tab（General/Model/Terminal/Memory/Advanced），但只有 Connection 的 URL+API Key 真正持久化到后端
+- 审查了后端 API：/api/config 已有 GET/PUT，updateConfig() 支持 YAML 读写
+- 发现 updateConfig() 的浅替换 bug：发送 {agent: {max_turns: 60}} 会丢失 agent.gateway_timeout
+- 修复了 config.ts updateConfig() 的深度合并逻辑（所有嵌套对象都做 spread 合并）
+- 添加了 invalidateConfigCache 到 barrel export (index.ts)
+- 重写了 settings-view.tsx (~530行)，所有改动：
+  1. 组件挂载时从 GET /api/config 加载完整配置填充所有表单字段
+  2. General Tab: Connection → PUT /api/hermes；Display/Personality → PUT /api/config {display: {...}}
+  3. Model Tab: Default Model, Provider, Base URL, Context Length → PUT /api/config {model: {...}}
+  4. Model Tab: API Keys 信息卡片（说明环境变量来源，不可通过 Web 修改）
+  5. Terminal Tab: Backend, Timeout → PUT /api/config {terminal: {...}}
+  6. Memory Tab: memory_enabled, user_profile_enabled, char limits → PUT /api/config {memory: {...}}
+  7. Advanced Tab: max_turns, gateway_timeout, tool_use_enforcement → PUT /api/config {agent: {...}}
+  8. Advanced Tab: compression settings → PUT /api/config {compression: {...}}
+  9. Advanced Tab: display options (compact, show_reasoning) → PUT /api/config {display: {...}}
+  10. "Reset All to Defaults" 按钮 → PUT /api/config with all default values
+  11. 统一的 SaveButton 组件，带 loading 状态（Spinner）
+  12. Config Source Badge 显示配置来源（env/config/default）
+- 增强了 /api/config 路由：
+  1. GET: forceReload=true 确保读取最新配置，返回结构化 sections
+  2. PUT: invalidateConfigCache + validate body + 返回更新后的完整配置
+- 验证了 API 深度合并：PUT {memory:{memory_char_limit:5000}} 保留其他 memory 字段
+- 验证了配置持久化：修改后再次 GET 返回更新后的值
+
+Stage Summary:
+- Settings 所有5个Tab现在完全与后端打通：
+  - General: Connection (Prisma DB) + Display/Personality (config.yaml)
+  - Model: Default model/provider/baseURL (config.yaml) + API keys info display
+  - Terminal: Backend/timeout (config.yaml)
+  - Memory: All memory settings (config.yaml)
+  - Advanced: Agent behavior + Compression + Display options (config.yaml)
+- 修复了 updateConfig() 的深度合并 bug
+- Files modified: settings-view.tsx, config.ts, index.ts, api/config/route.ts
+- ESLint: zero new errors in src/

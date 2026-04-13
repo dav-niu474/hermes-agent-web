@@ -78,7 +78,7 @@ export {
 } from "./provider";
 
 // Configuration management
-export { getHermesHome, loadConfig, getConfigValue, updateConfig, getLLMConfig, getToolsetFilter } from "./config";
+export { getHermesHome, loadConfig, getConfigValue, updateConfig, invalidateConfigCache, getLLMConfig, getToolsetFilter } from "./config";
 export type { LLMConfig, HermesConfig, ToolsetFilter } from "./config";
 
 // Tool registry — dynamic tool registration and dispatch

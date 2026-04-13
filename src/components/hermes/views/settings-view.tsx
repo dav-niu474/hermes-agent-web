@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings,
   Server,
@@ -15,11 +15,15 @@ import {
   WifiOff,
   Eye,
   EyeOff,
-  ChevronRight,
   Cpu,
   Zap,
   Shield,
   RefreshCw,
+  Key,
+  Loader2,
+  Check,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -47,67 +51,195 @@ import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
+// ─── Config response type ──────────────────────────────────────────────────────
+
+interface AppConfig {
+  model?: Record<string, unknown>;
+  agent?: { max_turns?: number; gateway_timeout?: number; tool_use_enforcement?: string };
+  terminal?: { backend?: string; timeout?: number };
+  browser?: { inactivity_timeout?: number; command_timeout?: number };
+  memory?: { memory_enabled?: boolean; user_profile_enabled?: boolean; memory_char_limit?: number; user_char_limit?: number };
+  display?: { compact?: boolean; personality?: string; streaming?: boolean; show_reasoning?: boolean };
+  compression?: { enabled?: boolean; threshold?: number; target_ratio?: number; protect_last_n?: number };
+  toolsets?: string[];
+  enabled_toolsets?: string[];
+  disabled_toolsets?: string[];
+  [key: string]: unknown;
+  llm?: {
+    model: string;
+    provider: string;
+    baseUrl: string;
+    hasApiKey: boolean;
+    apiMode: string;
+    source: string;
+  };
+}
+
+// ─── Helper: safe number ──────────────────────────────────────────────────────
+
+function num(val: unknown, fallback: number): number {
+  if (typeof val === 'number' && isFinite(val)) return val;
+  if (typeof val === 'string') { const n = Number(val); return isFinite(n) ? n : fallback; }
+  return fallback;
+}
+
+function bool(val: unknown, fallback: boolean): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') return val === 'true' || val === '1';
+  return fallback;
+}
+
+function str(val: unknown, fallback: string): string {
+  if (typeof val === 'string') return val;
+  return fallback;
+}
+
+// ─── Section save wrapper ─────────────────────────────────────────────────────
+
+async function saveConfigSection(sectionName: string, data: Record<string, unknown>) {
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `Failed to save ${sectionName}`);
+  }
+  return res.json();
+}
+
+// ─── Component ─────────────────────────────────────────────────────────────────
+
 export function SettingsView() {
   const { hermesUrl, setHermesUrl, hermesApiKey, setHermesApiKey, hermesModels, setHermesModels, agentStatus } = useAppStore();
+
+  // ── Loading / connection state ──
   const [urlInput, setUrlInput] = useState(hermesUrl);
   const [apiKeyInput, setApiKeyInput] = useState(hermesApiKey);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [rawConfig, setRawConfig] = useState<AppConfig | null>(null);
 
+  // ── Form state (each tab) ──
   const [generalSettings, setGeneralSettings] = useState({
-    sessionResetMode: 'both',
-    idleTimeout: 1440,
-    personality: 'helpful',
+    personality: 'kawaii',
   });
 
   const [modelSettings, setModelSettings] = useState({
-    defaultModel: 'hermes-agent',
-    smartRouting: false,
-    maxSimpleChars: 160,
-    cheapModel: '',
-    compressionModel: '',
+    defaultModel: '',
+    provider: 'auto',
+    baseUrl: '',
+    contextLength: 128000,
   });
 
   const [terminalSettings, setTerminalSettings] = useState({
     backend: 'local',
-    sshHost: '',
-    sshPort: 22,
-    sshUser: '',
     timeout: 180,
-    maxLifetime: 300,
   });
 
   const [memorySettings, setMemorySettings] = useState({
-    enabled: true,
-    userProfile: true,
-    charLimit: 2200,
-    nudgeInterval: 10,
-    provider: 'honcho',
+    memoryEnabled: true,
+    userProfileEnabled: true,
+    memoryCharLimit: 2200,
+    userCharLimit: 1375,
   });
 
   const [advancedSettings, setAdvancedSettings] = useState({
-    maxTurns: 60,
-    reasoningEffort: 'medium',
+    maxTurns: 90,
+    gatewayTimeout: 1800,
+    toolUseEnforcement: 'auto',
     compressionEnabled: true,
     compressionThreshold: 50,
-    delegationMaxIterations: 50,
+    protectLastN: 20,
+    displayCompact: false,
+    showReasoning: false,
   });
 
-  const handleSaveSection = async (name: string) => {
-    setSaving(true);
+  // ── Load config on mount ──
+  const loadConfig = useCallback(async () => {
     try {
-      await fetch('/api/hermes', {
+      const res = await fetch('/api/config');
+      const config: AppConfig = await res.json();
+
+      setRawConfig(config);
+
+      // General / Display
+      const display = config.display as Record<string, unknown> || {};
+      setGeneralSettings({
+        personality: str(display.personality, 'kawaii'),
+      });
+
+      // Model
+      const modelCfg = config.model as Record<string, unknown> || {};
+      setModelSettings({
+        defaultModel: str(modelCfg.default, ''),
+        provider: str(modelCfg.provider, 'auto'),
+        baseUrl: str(modelCfg.base_url, ''),
+        contextLength: num(modelCfg.context_length, 128000),
+      });
+
+      // Terminal
+      const termCfg = config.terminal as Record<string, unknown> || {};
+      setTerminalSettings({
+        backend: str(termCfg.backend, 'local'),
+        timeout: num(termCfg.timeout, 180),
+      });
+
+      // Memory
+      const memCfg = config.memory as Record<string, unknown> || {};
+      setMemorySettings({
+        memoryEnabled: bool(memCfg.memory_enabled, true),
+        userProfileEnabled: bool(memCfg.user_profile_enabled, true),
+        memoryCharLimit: num(memCfg.memory_char_limit, 2200),
+        userCharLimit: num(memCfg.user_char_limit, 1375),
+      });
+
+      // Advanced
+      const agentCfg = config.agent as Record<string, unknown> || {};
+      const compCfg = config.compression as Record<string, unknown> || {};
+      setAdvancedSettings({
+        maxTurns: num(agentCfg.max_turns, 90),
+        gatewayTimeout: num(agentCfg.gateway_timeout, 1800),
+        toolUseEnforcement: str(agentCfg.tool_use_enforcement, 'auto'),
+        compressionEnabled: bool(compCfg.enabled, true),
+        compressionThreshold: Math.round(num(compCfg.threshold, 0.5) * 100),
+        protectLastN: num(compCfg.protect_last_n, 20),
+        displayCompact: bool(display.compact, false),
+        showReasoning: bool(display.show_reasoning, false),
+      });
+
+      setConfigLoaded(true);
+    } catch (err) {
+      console.error('[Settings] Failed to load config:', err);
+      setConfigLoaded(true); // still show UI
+      toast.error('Failed to load agent configuration');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  // ── Section save handlers ──
+
+  const handleSaveConnection = async () => {
+    setSavingSection('connection');
+    try {
+      const res = await fetch('/api/hermes', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hermes_url: urlInput, hermes_api_key: apiKeyInput }),
       });
+      if (!res.ok) throw new Error('Save failed');
       setHermesUrl(urlInput);
       setHermesApiKey(apiKeyInput);
-      toast.success(`${name} settings saved`);
+      toast.success('Connection settings saved');
     } catch {
-      toast.error('Failed to save settings');
+      toast.error('Failed to save connection settings');
     } finally {
-      setSaving(false);
+      setSavingSection(null);
     }
   };
 
@@ -122,13 +254,17 @@ export function SettingsView() {
       setHermesUrl(urlInput);
       setHermesApiKey(apiKeyInput);
     } catch { /* ignore */ }
-    const res = await fetch('/api/hermes');
-    const data = await res.json();
-    if (data.status === 'connected') {
-      toast.success('Connected to Hermes Agent!');
-      if (data.models) setHermesModels(data.models);
-    } else {
-      toast.error(`Connection failed: ${data.error || 'Agent not reachable'}`);
+    try {
+      const res = await fetch('/api/hermes');
+      const data = await res.json();
+      if (data.status === 'connected') {
+        toast.success('Connected to Hermes Agent!');
+        if (data.models) setHermesModels(data.models);
+      } else {
+        toast.error(`Connection failed: ${data.error || 'Agent not reachable'}`);
+      }
+    } catch {
+      toast.error('Connection test failed');
     }
   };
 
@@ -145,368 +281,758 @@ export function SettingsView() {
     }
   };
 
+  const handleSaveGeneral = async () => {
+    setSavingSection('general');
+    try {
+      await saveConfigSection('General', {
+        display: {
+          personality: generalSettings.personality,
+        },
+      });
+      toast.success('General settings saved');
+      loadConfig(); // refresh
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleSaveModel = async () => {
+    setSavingSection('model');
+    try {
+      const modelPayload: Record<string, unknown> = {};
+      if (modelSettings.defaultModel) modelPayload.default = modelSettings.defaultModel;
+      if (modelSettings.provider && modelSettings.provider !== 'auto') modelPayload.provider = modelSettings.provider;
+      if (modelSettings.baseUrl) modelPayload.base_url = modelSettings.baseUrl;
+      if (modelSettings.contextLength) modelPayload.context_length = modelSettings.contextLength;
+      await saveConfigSection('Model', { model: modelPayload });
+      toast.success('Model settings saved');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleSaveTerminal = async () => {
+    setSavingSection('terminal');
+    try {
+      await saveConfigSection('Terminal', {
+        terminal: {
+          backend: terminalSettings.backend,
+          timeout: terminalSettings.timeout,
+        },
+      });
+      toast.success('Terminal settings saved');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleSaveMemory = async () => {
+    setSavingSection('memory');
+    try {
+      await saveConfigSection('Memory', {
+        memory: {
+          memory_enabled: memorySettings.memoryEnabled,
+          user_profile_enabled: memorySettings.userProfileEnabled,
+          memory_char_limit: memorySettings.memoryCharLimit,
+          user_char_limit: memorySettings.userCharLimit,
+        },
+      });
+      toast.success('Memory settings saved');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleSaveAdvanced = async () => {
+    setSavingSection('advanced');
+    try {
+      await saveConfigSection('Advanced', {
+        agent: {
+          max_turns: advancedSettings.maxTurns,
+          gateway_timeout: advancedSettings.gatewayTimeout,
+          tool_use_enforcement: advancedSettings.toolUseEnforcement,
+        },
+        compression: {
+          enabled: advancedSettings.compressionEnabled,
+          threshold: advancedSettings.compressionThreshold / 100,
+          protect_last_n: advancedSettings.protectLastN,
+        },
+        display: {
+          compact: advancedSettings.displayCompact,
+          show_reasoning: advancedSettings.showReasoning,
+        },
+      });
+      toast.success('Advanced settings saved');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleResetDefaults = async () => {
+    setSavingSection('advanced');
+    try {
+      await saveConfigSection('Defaults', {
+        agent: { max_turns: 90, gateway_timeout: 1800, tool_use_enforcement: 'auto' },
+        compression: { enabled: true, threshold: 0.5, target_ratio: 0.2, protect_last_n: 20 },
+        display: { compact: false, personality: 'kawaii', streaming: false, show_reasoning: false },
+        terminal: { backend: 'local', timeout: 180 },
+        memory: { memory_enabled: true, user_profile_enabled: true, memory_char_limit: 2200, user_char_limit: 1375 },
+      });
+      toast.success('Settings reset to defaults');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  // ── Reusable SaveButton ──
+
+  const SaveButton = ({ section, label = 'Save', variant = 'default' }: { section: string; label?: string; variant?: 'default' | 'outline' }) => (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={savingSection !== null}
+      onClick={() => {
+        switch (section) {
+          case 'connection': handleSaveConnection(); break;
+          case 'general': handleSaveGeneral(); break;
+          case 'model': handleSaveModel(); break;
+          case 'terminal': handleSaveTerminal(); break;
+          case 'memory': handleSaveMemory(); break;
+          case 'advanced': handleSaveAdvanced(); break;
+        }
+      }}
+      className="gap-1.5"
+    >
+      {savingSection === section ? (
+        <Loader2 className="size-3.5 animate-spin" />
+      ) : (
+        <Save className="size-3.5" />
+      )}
+      {label}
+    </Button>
+  );
+
+  // ── Config source badge ──
+
+  const SourceBadge = () => {
+    const source = rawConfig?.llm?.source || 'unknown';
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="text-[10px] gap-1 cursor-help">
+            <Info className="size-2.5" />
+            {source === 'env' ? 'From env vars' : source === 'config' ? 'From config.yaml' : source === 'override' ? 'Session override' : 'Defaults'}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs max-w-xs">
+          Config is loaded from environment variables, config.yaml (~/.hermes/config.yaml), or built-in defaults. Changes here write to config.yaml.
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  // ── Render ──
+
   return (
     <div className="flex flex-col h-full">
       <header className="shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 sm:px-6 pt-4 pb-4">
-        <h1 className="text-xl font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Configure your Hermes Agent connection and preferences</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">Settings</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Configure agent connection, behavior, and preferences</p>
+          </div>
+          <SourceBadge />
+        </div>
       </header>
 
       <ScrollArea className="flex-1">
-        <div className="p-4 sm:p-6 max-w-4xl mx-auto">
-          <Tabs defaultValue="general" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="general" className="text-xs gap-1"><Settings className="size-3" />General</TabsTrigger>
-              <TabsTrigger value="model" className="text-xs gap-1"><Bot className="size-3" />Model</TabsTrigger>
-              <TabsTrigger value="terminal" className="text-xs gap-1"><Terminal className="size-3" />Terminal</TabsTrigger>
-              <TabsTrigger value="memory" className="text-xs gap-1"><Brain className="size-3" />Memory</TabsTrigger>
-              <TabsTrigger value="advanced" className="text-xs gap-1"><Sliders className="size-3" />Advanced</TabsTrigger>
-            </TabsList>
+        <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
+          {!configLoaded ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              <span className="ml-3 text-sm text-muted-foreground">Loading configuration...</span>
+            </div>
+          ) : (
+            <Tabs defaultValue="general" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="general" className="text-xs gap-1"><Settings className="size-3" />General</TabsTrigger>
+                <TabsTrigger value="model" className="text-xs gap-1"><Bot className="size-3" />Model</TabsTrigger>
+                <TabsTrigger value="terminal" className="text-xs gap-1"><Terminal className="size-3" />Terminal</TabsTrigger>
+                <TabsTrigger value="memory" className="text-xs gap-1"><Brain className="size-3" />Memory</TabsTrigger>
+                <TabsTrigger value="advanced" className="text-xs gap-1"><Sliders className="size-3" />Advanced</TabsTrigger>
+              </TabsList>
 
-            {/* ─── General Tab ─── */}
-            <TabsContent value="general" className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Server className="size-4" /> Agent Connection
-                    </CardTitle>
-                    <CardDescription>Configure how to connect to your Hermes Agent instance</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="hermes-url">Agent URL</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          id="hermes-url"
-                          value={urlInput}
-                          onChange={(e) => setUrlInput(e.target.value)}
-                          placeholder="http://localhost:8642"
-                          className="flex-1 font-mono text-sm"
-                        />
-                        <Button variant="outline" size="sm" onClick={handleTestConnection} className="gap-1.5">
-                          <Wifi className="size-3" /> Test
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            'text-xs',
-                            agentStatus === 'connected' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' :
-                            agentStatus === 'error' ? 'border-red-300 bg-red-50 text-red-700' :
-                            'text-muted-foreground'
+              {/* ─── General Tab ─── */}
+              <TabsContent value="general" className="space-y-6">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Server className="size-4" /> Agent Connection
+                      </CardTitle>
+                      <CardDescription>Configure how the web UI connects to the Hermes Agent backend</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="hermes-url">Agent Base URL</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="hermes-url"
+                            value={urlInput}
+                            onChange={(e) => setUrlInput(e.target.value)}
+                            placeholder="http://localhost:3000"
+                            className="flex-1 font-mono text-sm"
+                          />
+                          <Button variant="outline" size="sm" onClick={handleTestConnection} className="gap-1.5 shrink-0">
+                            <Wifi className="size-3" /> Test
+                          </Button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'text-xs',
+                              agentStatus === 'connected' ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800' :
+                              agentStatus === 'error' ? 'border-red-300 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800' :
+                              'text-muted-foreground'
+                            )}
+                          >
+                            <div className={cn('size-1.5 rounded-full mr-1.5', agentStatus === 'connected' ? 'bg-emerald-500' : agentStatus === 'error' ? 'bg-red-500' : 'bg-muted-foreground')} />
+                            {agentStatus === 'connected' ? 'Connected' : agentStatus === 'error' ? 'Error' : 'Disconnected'}
+                          </Badge>
+                          {rawConfig?.llm && (
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              {rawConfig.llm.provider}/{rawConfig.llm.model}
+                            </span>
                           )}
-                        >
-                          <div className={cn('size-1.5 rounded-full mr-1.5', agentStatus === 'connected' ? 'bg-emerald-500' : agentStatus === 'error' ? 'bg-red-500' : 'bg-muted-foreground')} />
-                          {agentStatus === 'connected' ? 'Connected' : agentStatus === 'error' ? 'Error' : 'Disconnected'}
-                        </Badge>
+                        </div>
                       </div>
-                    </div>
 
-                    <Separator />
+                      <Separator />
 
-                    <div className="space-y-2">
-                      <Label htmlFor="api-key" className="flex items-center gap-2">
-                        <Shield className="size-3.5 text-primary" /> Hermes API Key
-                      </Label>
-                      <p className="text-[11px] text-muted-foreground">
-                        Bearer token for Hermes Agent authentication (optional, set via API_SERVER_KEY)
-                      </p>
-                      <div className="relative">
-                        <Input
-                          id="api-key"
-                          type={showApiKey ? 'text' : 'password'}
-                          value={apiKeyInput}
-                          onChange={(e) => setApiKeyInput(e.target.value)}
-                          placeholder="Your API server key"
-                          className="pr-10 font-mono text-xs"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-0 top-0 size-9"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                        >
-                          {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                        </Button>
+                      <div className="space-y-2">
+                        <Label htmlFor="api-key" className="flex items-center gap-2">
+                          <Shield className="size-3.5 text-primary" /> API Server Key
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Optional bearer token for Hermes Agent API authentication
+                        </p>
+                        <div className="relative">
+                          <Input
+                            id="api-key"
+                            type={showApiKey ? 'text' : 'password'}
+                            value={apiKeyInput}
+                            onChange={(e) => setApiKeyInput(e.target.value)}
+                            placeholder="Your API server key"
+                            className="pr-10 font-mono text-xs"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0 top-0 size-9"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                          >
+                            {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                          </Button>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={() => handleSaveSection('Connection')} disabled={saving} className="gap-1.5">
-                        <Save className="size-3.5" /> Save & Connect
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Session & Personality</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Session Reset Mode</Label>
-                      <Select value={generalSettings.sessionResetMode} onValueChange={(v) => setGeneralSettings({ ...generalSettings, sessionResetMode: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">Auto (idle + hourly)</SelectItem>
-                          <SelectItem value="manual">Manual only</SelectItem>
-                          <SelectItem value="both">Both</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Idle Timeout: {generalSettings.idleTimeout} minutes</Label>
-                      <Slider value={[generalSettings.idleTimeout]} onValueChange={([v]) => setGeneralSettings({ ...generalSettings, idleTimeout: v })} min={60} max={4320} step={60} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Personality Preset</Label>
-                      <Select value={generalSettings.personality} onValueChange={(v) => setGeneralSettings({ ...generalSettings, personality: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="helpful">Helpful Assistant</SelectItem>
-                          <SelectItem value="concise">Concise & Direct</SelectItem>
-                          <SelectItem value="creative">Creative & Exploratory</SelectItem>
-                          <SelectItem value="technical">Technical Expert</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="outline" onClick={() => handleSaveSection('Session')} className="gap-1.5">
-                        <Save className="size-3.5" /> Save
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </TabsContent>
-
-            {/* ─── Model Tab ─── */}
-            <TabsContent value="model" className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Bot className="size-4" /> Agent Model
-                    </CardTitle>
-                    <CardDescription>Model configuration is managed by Hermes Agent. The agent selects the best LLM for each task.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
-                      <div className="p-2 rounded-lg bg-primary/10">
-                        <Cpu className="size-4 text-primary" />
+                      <div className="flex justify-end">
+                        <SaveButton section="connection" label="Save & Connect" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">Hermes Agent</p>
-                        <p className="text-xs text-muted-foreground">Autonomous AI agent with 40+ built-in tools</p>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Zap className="size-4" /> Display & Personality
+                      </CardTitle>
+                      <CardDescription>Customize agent personality and display preferences</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Agent Personality</Label>
+                        <Select value={generalSettings.personality} onValueChange={(v) => setGeneralSettings({ ...generalSettings, personality: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="kawaii">🌸 Kawaii</SelectItem>
+                            <SelectItem value="helpful">💬 Helpful Assistant</SelectItem>
+                            <SelectItem value="concise">⚡ Concise & Direct</SelectItem>
+                            <SelectItem value="creative">🎨 Creative & Exploratory</SelectItem>
+                            <SelectItem value="technical">🔧 Technical Expert</SelectItem>
+                            <SelectItem value="formal">🎩 Formal Professional</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-muted-foreground">Affects the system prompt tone. Takes effect on new conversations.</p>
                       </div>
-                      <Badge variant="outline" className="shrink-0">Active</Badge>
-                    </div>
+                      <div className="flex justify-end">
+                        <SaveButton section="general" variant="outline" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </TabsContent>
 
-                    <Separator />
+              {/* ─── Model Tab ─── */}
+              <TabsContent value="model" className="space-y-6">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Bot className="size-4" /> Model Configuration
+                      </CardTitle>
+                      <CardDescription>Configure the default LLM model used by the agent. Changes take effect on new conversations.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Current model status */}
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
+                        <div className="p-2 rounded-lg bg-primary/10">
+                          <Cpu className="size-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium font-mono truncate">
+                            {rawConfig?.llm?.model || 'Not configured'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Provider: <span className="font-mono">{rawConfig?.llm?.provider || 'unknown'}</span>
+                            {' · '}
+                            API Key: {rawConfig?.llm?.hasApiKey ? <span className="text-emerald-600">✓ Configured</span> : <span className="text-amber-600">✗ Missing</span>}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0 capitalize">{rawConfig?.llm?.apiMode?.replace('_', ' ')}</Badge>
+                      </div>
 
-                    <div className="space-y-2">
+                      <Separator />
+
+                      {/* Editable fields */}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Default Model</Label>
+                          <Input
+                            value={modelSettings.defaultModel}
+                            onChange={(e) => setModelSettings({ ...modelSettings, defaultModel: e.target.value })}
+                            placeholder="meta/llama-3.3-70b-instruct"
+                            className="font-mono text-sm"
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Leave empty to use the provider&apos;s default model.
+                            Examples: <code className="text-[10px] bg-muted px-1 py-0.5 rounded">meta/llama-3.3-70b-instruct</code>, <code className="text-[10px] bg-muted px-1 py-0.5 rounded">gpt-4o</code>, <code className="text-[10px] bg-muted px-1 py-0.5 rounded">claude-sonnet-4-20250514</code>
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Provider</Label>
+                            <Select value={modelSettings.provider} onValueChange={(v) => setModelSettings({ ...modelSettings, provider: v })}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">Auto-detect</SelectItem>
+                                <SelectItem value="nvidia">NVIDIA NIM</SelectItem>
+                                <SelectItem value="openai">OpenAI</SelectItem>
+                                <SelectItem value="anthropic">Anthropic</SelectItem>
+                                <SelectItem value="openrouter">OpenRouter</SelectItem>
+                                <SelectItem value="google">Google / Gemini</SelectItem>
+                                <SelectItem value="glm">GLM / ZhipuAI</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Context Length: {modelSettings.contextLength.toLocaleString()}</Label>
+                            <Slider
+                              value={[modelSettings.contextLength]}
+                              onValueChange={([v]) => setModelSettings({ ...modelSettings, contextLength: v })}
+                              min={4096}
+                              max={2000000}
+                              step={4096}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Custom Base URL</Label>
+                          <Input
+                            value={modelSettings.baseUrl}
+                            onChange={(e) => setModelSettings({ ...modelSettings, baseUrl: e.target.value })}
+                            placeholder="https://api.openai.com/v1 (leave empty for default)"
+                            className="font-mono text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <SaveButton section="model" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
-                        <Label>Available Models from Agent</Label>
-                        <Button variant="ghost" size="sm" onClick={handleRefreshModels} className="gap-1 text-xs h-7">
+                        <div>
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Key className="size-4" /> API Keys (Environment)
+                          </CardTitle>
+                          <CardDescription className="mt-1">API keys are resolved from environment variables at startup. Set them in <code className="text-[10px] bg-muted px-1 py-0.5 rounded">~/.hermes/.env</code> or system env.</CardDescription>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={handleRefreshModels} className="gap-1 text-xs h-7 shrink-0">
                           <RefreshCw className="size-3" /> Refresh
                         </Button>
                       </div>
-                      {hermesModels.length > 0 ? (
-                        <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
-                          {hermesModels.map((m) => (
-                            <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border/40">
-                              <div className="flex items-center gap-2">
-                                <div className="size-2 rounded-full bg-emerald-500" />
-                                <span className="text-sm font-mono">{m.id}</span>
-                              </div>
-                              <Badge variant="secondary" className="text-[10px]">{m.owned_by}</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground py-4 text-center">No models loaded. Click Refresh to fetch from agent.</p>
-                      )}
-                    </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {[
+                          { var: 'NVIDIA_API_KEY', provider: 'NVIDIA NIM' },
+                          { var: 'OPENAI_API_KEY', provider: 'OpenAI' },
+                          { var: 'ANTHROPIC_API_KEY', provider: 'Anthropic' },
+                          { var: 'OPENROUTER_API_KEY', provider: 'OpenRouter' },
+                          { var: 'GOOGLE_API_KEY', provider: 'Google' },
+                          { var: 'GLM_API_KEY', provider: 'GLM/ZhipuAI' },
+                        ].map(({ var: envVar, provider }) => (
+                          <div key={envVar} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/40 bg-card">
+                            <Badge variant="outline" className="text-[10px] shrink-0">{provider}</Badge>
+                            <code className="text-[10px] text-muted-foreground font-mono truncate">{envVar}</code>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="size-3 text-muted-foreground shrink-0 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                Set in ~/.hermes/.env or system environment. Cannot be changed from web UI for security.
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </TabsContent>
 
-                    <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Note:</span> The Hermes Agent handles model selection internally. 
-                        Configure the default model in your hermes-agent CLI config (<code className="text-[10px] bg-muted px-1 py-0.5 rounded">~/.hermes/.env</code>). 
-                        This web interface sends all requests to the agent, which routes them to the appropriate LLM.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </TabsContent>
+              {/* ─── Terminal Tab ─── */}
+              <TabsContent value="terminal" className="space-y-6">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Terminal className="size-4" /> Terminal Configuration
+                      </CardTitle>
+                      <CardDescription>Configure the terminal/shell execution backend used by the agent&apos;s terminal tool</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Execution Backend</Label>
+                        <Select value={terminalSettings.backend} onValueChange={(v) => setTerminalSettings({ ...terminalSettings, backend: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="local">Local (subprocess)</SelectItem>
+                            <SelectItem value="docker">Docker container</SelectItem>
+                            <SelectItem value="ssh">SSH (Remote)</SelectItem>
+                            <SelectItem value="modal">Modal (Serverless)</SelectItem>
+                            <SelectItem value="daytona">Daytona</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-muted-foreground">
+                          <span className="font-medium text-foreground">Current:</span> {terminalSettings.backend} — {' '}
+                          {terminalSettings.backend === 'local' && 'Commands run directly on the host machine'}
+                          {terminalSettings.backend === 'docker' && 'Commands run inside an isolated Docker container'}
+                          {terminalSettings.backend === 'ssh' && 'Commands run on a remote SSH host'}
+                          {terminalSettings.backend === 'modal' && 'Commands run in Modal serverless functions'}
+                          {terminalSettings.backend === 'daytona' && 'Commands run in Daytona dev environments'}
+                        </p>
+                      </div>
 
-            {/* ─── Terminal Tab ─── */}
-            <TabsContent value="terminal" className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Terminal className="size-4" /> Terminal Configuration
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Execution Backend</Label>
-                      <Select value={terminalSettings.backend} onValueChange={(v) => setTerminalSettings({ ...terminalSettings, backend: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="local">Local</SelectItem>
-                          <SelectItem value="docker">Docker</SelectItem>
-                          <SelectItem value="ssh">SSH (Remote)</SelectItem>
-                          <SelectItem value="modal">Modal (Serverless)</SelectItem>
-                          <SelectItem value="daytona">Daytona</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {terminalSettings.backend === 'ssh' && (
-                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="grid grid-cols-3 gap-3 pl-4 border-l-2 border-border/50">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Host</Label>
-                          <Input value={terminalSettings.sshHost} onChange={(e) => setTerminalSettings({ ...terminalSettings, sshHost: e.target.value })} placeholder="192.168.1.100" className="h-8 text-xs font-mono" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Port</Label>
-                          <Input type="number" value={terminalSettings.sshPort} onChange={(e) => setTerminalSettings({ ...terminalSettings, sshPort: parseInt(e.target.value) || 22 })} className="h-8 text-xs font-mono" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">User</Label>
-                          <Input value={terminalSettings.sshUser} onChange={(e) => setTerminalSettings({ ...terminalSettings, sshUser: e.target.value })} placeholder="ubuntu" className="h-8 text-xs" />
-                        </div>
-                      </motion.div>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Default Timeout: {terminalSettings.timeout}s</Label>
-                        <Slider value={[terminalSettings.timeout]} onValueChange={([v]) => setTerminalSettings({ ...terminalSettings, timeout: v })} min={30} max={600} step={30} />
+                        <Slider
+                          value={[terminalSettings.timeout]}
+                          onValueChange={([v]) => setTerminalSettings({ ...terminalSettings, timeout: v })}
+                          min={30}
+                          max={600}
+                          step={30}
+                        />
+                        <p className="text-[11px] text-muted-foreground">Maximum seconds before a terminal command is auto-killed</p>
                       </div>
+
+                      <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">Note:</span> Terminal settings affect the agent&apos;s <code className="text-[10px] bg-muted px-1 py-0.5 rounded">terminal</code> and <code className="text-[10px] bg-muted px-1 py-0.5 rounded">execute_code</code> tools. 
+                          Changes apply to new tool invocations.
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <SaveButton section="terminal" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </TabsContent>
+
+              {/* ─── Memory Tab ─── */}
+              <TabsContent value="memory" className="space-y-6">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Brain className="size-4" /> Memory Configuration
+                      </CardTitle>
+                      <CardDescription>Configure how the agent stores and retrieves information across conversations</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Persistent Memory</Label>
+                          <p className="text-xs text-muted-foreground">Enable agent to store and recall long-term information in MEMORY.md</p>
+                        </div>
+                        <Switch
+                          checked={memorySettings.memoryEnabled}
+                          onCheckedChange={(v) => setMemorySettings({ ...memorySettings, memoryEnabled: v })}
+                        />
+                      </div>
+
+                      <Separator />
+
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>User Profile Modeling</Label>
+                          <p className="text-xs text-muted-foreground">Enable the agent to build a user profile in USER.md across sessions</p>
+                        </div>
+                        <Switch
+                          checked={memorySettings.userProfileEnabled}
+                          onCheckedChange={(v) => setMemorySettings({ ...memorySettings, userProfileEnabled: v })}
+                        />
+                      </div>
+
+                      <Separator />
+
                       <div className="space-y-2">
-                        <Label>Max Lifetime: {terminalSettings.maxLifetime}s</Label>
-                        <Slider value={[terminalSettings.maxLifetime]} onValueChange={([v]) => setTerminalSettings({ ...terminalSettings, maxLifetime: v })} min={60} max={3600} step={60} />
+                        <Label>Memory Character Limit: {memorySettings.memoryCharLimit.toLocaleString()}</Label>
+                        <Slider
+                          value={[memorySettings.memoryCharLimit]}
+                          onValueChange={([v]) => setMemorySettings({ ...memorySettings, memoryCharLimit: v })}
+                          min={500}
+                          max={8000}
+                          step={100}
+                        />
+                        <p className="text-[11px] text-muted-foreground">Max characters the agent can store in MEMORY.md. Higher limits use more context window.</p>
                       </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={() => handleSaveSection('Terminal')} className="gap-1.5"><Save className="size-3.5" /> Save</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </TabsContent>
 
-            {/* ─── Memory Tab ─── */}
-            <TabsContent value="memory" className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Brain className="size-4" /> Memory Configuration
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Persistent Memory</Label>
-                        <p className="text-xs text-muted-foreground">Enable agent to store and recall information</p>
+                      <div className="space-y-2">
+                        <Label>User Profile Character Limit: {memorySettings.userCharLimit.toLocaleString()}</Label>
+                        <Slider
+                          value={[memorySettings.userCharLimit]}
+                          onValueChange={([v]) => setMemorySettings({ ...memorySettings, userCharLimit: v })}
+                          min={200}
+                          max={5000}
+                          step={100}
+                        />
+                        <p className="text-[11px] text-muted-foreground">Max characters for the user profile in USER.md.</p>
                       </div>
-                      <Switch checked={memorySettings.enabled} onCheckedChange={(v) => setMemorySettings({ ...memorySettings, enabled: v })} />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>User Profile Modeling</Label>
-                        <p className="text-xs text-muted-foreground">Build a user profile across sessions</p>
-                      </div>
-                      <Switch checked={memorySettings.userProfile} onCheckedChange={(v) => setMemorySettings({ ...memorySettings, userProfile: v })} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Memory Character Limit: {memorySettings.charLimit}</Label>
-                      <Slider value={[memorySettings.charLimit]} onValueChange={([v]) => setMemorySettings({ ...memorySettings, charLimit: v })} min={500} max={5000} step={100} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Nudge Interval: every {memorySettings.nudgeInterval} turns</Label>
-                      <Slider value={[memorySettings.nudgeInterval]} onValueChange={([v]) => setMemorySettings({ ...memorySettings, nudgeInterval: v })} min={5} max={30} step={5} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Memory Provider</Label>
-                      <Select value={memorySettings.provider} onValueChange={(v) => setMemorySettings({ ...memorySettings, provider: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="honcho">Honcho (Dialectic)</SelectItem>
-                          <SelectItem value="holographic">Holographic</SelectItem>
-                          <SelectItem value="mem0">Mem0</SelectItem>
-                          <SelectItem value="retaindb">RetainDB</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={() => handleSaveSection('Memory')} className="gap-1.5"><Save className="size-3.5" /> Save</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </TabsContent>
 
-            {/* ─── Advanced Tab ─── */}
-            <TabsContent value="advanced" className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Sliders className="size-4" /> Advanced Settings
-                    </CardTitle>
-                    <CardDescription>Fine-tune agent behavior and performance</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Max Agent Turns: {advancedSettings.maxTurns}</Label>
-                      <Slider value={[advancedSettings.maxTurns]} onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, maxTurns: v })} min={10} max={200} step={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Reasoning Effort</Label>
-                      <Select value={advancedSettings.reasoningEffort} onValueChange={(v) => setAdvancedSettings({ ...advancedSettings, reasoningEffort: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low (faster, cheaper)</SelectItem>
-                          <SelectItem value="medium">Medium (balanced)</SelectItem>
-                          <SelectItem value="high">High (thorough)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Separator />
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Context Compression</Label>
-                        <p className="text-xs text-muted-foreground">Summarize old messages to save context space</p>
+                      <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">How it works:</span> The agent uses the <code className="text-[10px] bg-muted px-1 py-0.5 rounded">memory</code> tool to write key facts to <code className="text-[10px] bg-muted px-1 py-0.5 rounded">~/.hermes/memory/MEMORY.md</code> and <code className="text-[10px] bg-muted px-1 py-0.5 rounded">USER.md</code>. 
+                          This context is injected into every new conversation&apos;s system prompt.
+                        </p>
                       </div>
-                      <Switch checked={advancedSettings.compressionEnabled} onCheckedChange={(v) => setAdvancedSettings({ ...advancedSettings, compressionEnabled: v })} />
-                    </div>
-                    {advancedSettings.compressionEnabled && (
-                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2 pl-4 border-l-2 border-border/50">
-                        <Label className="text-xs">Compression Threshold: {advancedSettings.compressionThreshold}%</Label>
-                        <Slider value={[advancedSettings.compressionThreshold]} onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, compressionThreshold: v })} min={30} max={80} step={5} />
-                      </motion.div>
+
+                      <div className="flex justify-end">
+                        <SaveButton section="memory" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </TabsContent>
+
+              {/* ─── Advanced Tab ─── */}
+              <TabsContent value="advanced" className="space-y-6">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Sliders className="size-4" /> Agent Behavior
+                      </CardTitle>
+                      <CardDescription>Fine-tune how the agent loop works</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Max Agent Turns: {advancedSettings.maxTurns}</Label>
+                        <Slider
+                          value={[advancedSettings.maxTurns]}
+                          onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, maxTurns: v })}
+                          min={10}
+                          max={200}
+                          step={10}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Maximum iterations of the LLM → tool_call → execute → feed-back loop per conversation turn.
+                          The agent receives warnings at 70% and 90% of this limit.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Gateway Timeout: {Math.round(advancedSettings.gatewayTimeout / 60)} minutes</Label>
+                        <Slider
+                          value={[advancedSettings.gatewayTimeout]}
+                          onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, gatewayTimeout: v })}
+                          min={300}
+                          max={7200}
+                          step={300}
+                        />
+                        <p className="text-[11px] text-muted-foreground">Maximum wall-clock time (seconds) for a single agent conversation turn before auto-timeout.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Tool Use Enforcement</Label>
+                        <Select value={advancedSettings.toolUseEnforcement} onValueChange={(v) => setAdvancedSettings({ ...advancedSettings, toolUseEnforcement: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Auto (model-dependent)</SelectItem>
+                            <SelectItem value="always">Always (force tool usage)</SelectItem>
+                            <SelectItem value="never">Never (text-only responses)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-muted-foreground">
+                          Controls whether the agent is instructed to always use tools instead of describing actions. 
+                          &quot;Auto&quot; enables enforcement only for models that tend to describe instead of act (GPT, Codex, Gemini).
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Zap className="size-4" /> Context Compression
+                      </CardTitle>
+                      <CardDescription>Control how old messages are compressed to save context window space</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Enable Compression</Label>
+                          <p className="text-xs text-muted-foreground">Summarize older messages to reduce context usage</p>
+                        </div>
+                        <Switch
+                          checked={advancedSettings.compressionEnabled}
+                          onCheckedChange={(v) => setAdvancedSettings({ ...advancedSettings, compressionEnabled: v })}
+                        />
+                      </div>
+
+                      <AnimatePresence>
+                        {advancedSettings.compressionEnabled && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="space-y-4 overflow-hidden"
+                          >
+                            <div className="space-y-2">
+                              <Label>Compression Threshold: {advancedSettings.compressionThreshold}%</Label>
+                              <Slider
+                                value={[advancedSettings.compressionThreshold]}
+                                onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, compressionThreshold: v })}
+                                min={30}
+                                max={80}
+                                step={5}
+                              />
+                              <p className="text-[11px] text-muted-foreground">
+                                Trigger compression when context usage reaches this percentage of the model&apos;s context window.
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Protect Last N Messages: {advancedSettings.protectLastN}</Label>
+                              <Slider
+                                value={[advancedSettings.protectLastN]}
+                                onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, protectLastN: v })}
+                                min={5}
+                                max={50}
+                                step={5}
+                              />
+                              <p className="text-[11px] text-muted-foreground">
+                                Most recent N messages are always kept intact (never compressed).
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Settings className="size-4" /> Display Options
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Compact Mode</Label>
+                          <p className="text-xs text-muted-foreground">Use more compact message display</p>
+                        </div>
+                        <Switch
+                          checked={advancedSettings.displayCompact}
+                          onCheckedChange={(v) => setAdvancedSettings({ ...advancedSettings, displayCompact: v })}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Show Reasoning</Label>
+                          <p className="text-xs text-muted-foreground">Display model reasoning/thinking in responses</p>
+                        </div>
+                        <Switch
+                          checked={advancedSettings.showReasoning}
+                          onCheckedChange={(v) => setAdvancedSettings({ ...advancedSettings, showReasoning: v })}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                {/* Save + Reset */}
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" className="gap-1.5" onClick={handleResetDefaults} disabled={savingSection !== null}>
+                    {savingSection === 'advanced' ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-3" />
                     )}
-                    <div className="space-y-2">
-                      <Label>Delegation Max Iterations: {advancedSettings.delegationMaxIterations}</Label>
-                      <Slider value={[advancedSettings.delegationMaxIterations]} onValueChange={([v]) => setAdvancedSettings({ ...advancedSettings, delegationMaxIterations: v })} min={10} max={100} step={10} />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" className="gap-1.5"><RotateCcw className="size-3" /> Reset Defaults</Button>
-                      <Button size="sm" onClick={() => handleSaveSection('Advanced')} className="gap-1.5"><Save className="size-3.5" /> Save</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </TabsContent>
-          </Tabs>
+                    Reset All to Defaults
+                  </Button>
+                  <SaveButton section="advanced" />
+                </div>
+              </TabsContent>
+            </Tabs>
+          )}
         </div>
       </ScrollArea>
     </div>

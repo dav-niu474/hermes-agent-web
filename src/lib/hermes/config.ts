@@ -348,11 +348,29 @@ export function updateConfig(updates: Record<string, unknown>): HermesConfig {
   const config = loadConfig();
   const configPath = getConfigPath();
 
-  // Merge updates into config (shallow for top-level, deep for model section)
+  // Merge updates into config — deep-merge for all nested objects
   for (const [key, value] of Object.entries(updates)) {
-    if (key === "model" && typeof value === "object" && value !== null) {
-      config.model = { ...(typeof config.model === "object" ? config.model : { default: "" }), ...value } as ModelConfig;
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      // Deep-merge: existing[key] ← { ...existing[key], ...value }
+      const existing = (config as Record<string, unknown>)[key];
+      if (
+        existing !== null &&
+        typeof existing === "object" &&
+        !Array.isArray(existing)
+      ) {
+        (config as Record<string, unknown>)[key] = {
+          ...(existing as Record<string, unknown>),
+          ...(value as Record<string, unknown>),
+        };
+      } else {
+        (config as Record<string, unknown>)[key] = value;
+      }
     } else {
+      // Primitive values or arrays: direct assignment
       (config as Record<string, unknown>)[key] = value;
     }
   }
