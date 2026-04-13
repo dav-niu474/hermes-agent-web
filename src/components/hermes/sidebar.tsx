@@ -374,6 +374,13 @@ function ChatHistorySection({
     if (currentView === 'chat') fetchSessions();
   }, [currentView, fetchSessions]);
 
+  // Listen for custom event to refresh sessions (dispatched by ChatView after sending messages)
+  useEffect(() => {
+    const handler = () => fetchSessions();
+    window.addEventListener('hermes:refresh-sessions', handler);
+    return () => window.removeEventListener('hermes:refresh-sessions', handler);
+  }, [fetchSessions]);
+
   const handleNewChat = () => {
     clearMessages();
     setCurrentSessionId(null);

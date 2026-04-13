@@ -1200,6 +1200,8 @@ export function ChatView() {
       if (newSessionId && newSessionId !== currentSessionId) {
         setCurrentSessionId(newSessionId);
         fetchSessions();
+        // Notify sidebar to refresh session list
+        window.dispatchEvent(new CustomEvent('hermes:refresh-sessions'));
       }
 
       const reader = response.body?.getReader();
