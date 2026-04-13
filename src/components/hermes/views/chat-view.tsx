@@ -1343,39 +1343,11 @@ export function ChatView() {
 
   return (
     <div className="absolute inset-0 flex">
-      {/* ─── Left Panel: Session List ─── */}
-      <div className="hidden md:flex w-64 lg:w-72 border-r border-border/50 bg-card/20 flex-col shrink-0">
-        <SessionList
-          sessions={sessions}
-          activeId={currentSessionId}
-          onSelect={handleSelectSession}
-          onNew={handleNewChat}
-          onDelete={handleDeleteSession}
-        />
-      </div>
-
-      {/* ─── Right Panel: Chat Area ─── */}
+      {/* ─── Chat Area ─── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header — fixed at top */}
         <header className="shrink-0 border-b border-border/50 bg-background/90 backdrop-blur-sm px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 z-10">
           <div className="flex items-center gap-2.5 min-w-0">
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="md:hidden size-8">
-                  <MessageSquare className="size-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-64 p-0">
-                <SheetTitle className="sr-only">Sessions</SheetTitle>
-                <SessionList
-                  sessions={sessions}
-                  activeId={currentSessionId}
-                  onSelect={handleSelectSession}
-                  onNew={handleNewChat}
-                  onDelete={handleDeleteSession}
-                />
-              </SheetContent>
-            </Sheet>
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate leading-tight">
                 {loadingSession ? 'Loading...' : currentSessionId ? 'Chat' : 'New Chat'}
@@ -1398,14 +1370,6 @@ export function ChatView() {
               onSelectModel={handleModelSelect}
               disabled={isStreaming}
             />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7" onClick={handleNewChat}>
-                  <Plus className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>New Chat</TooltipContent>
-            </Tooltip>
           </div>
         </header>
 

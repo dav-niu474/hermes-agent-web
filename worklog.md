@@ -1290,3 +1290,27 @@ Stage Summary:
   8. ✅ Image/audio display (chat-view.tsx)
 - Prisma schema fixed to SQLite
 - All code compiles and runs, zero new lint errors
+---
+Task ID: 1
+Agent: main
+Task: Move chat history (New Chat + session list) from chat page left panel to sidebar bottom section
+
+Work Log:
+- Analyzed current layout: ChatView had a dedicated left panel (w-64/72) for SessionList + New Chat button in header
+- Identified sidebar structure: custom Hermes sidebar with nav items, status/theme/dark-mode at bottom
+- Created ChatHistorySection component in sidebar.tsx with:
+  - New Chat button (expanded: outlined button; collapsed: icon with tooltip)
+  - Recent sessions list (max 8, scrollable, with time-ago via formatDistanceToNow)
+  - Session delete with AlertDialog confirmation
+  - Session click navigates to chat view and sets currentSessionId
+  - Auto-refreshes when switching to chat view
+- Removed Sessions nav item from sidebar navigation (7 items instead of 8)
+- Removed left panel SessionList from ChatView (was w-64 lg:w-72)
+- Removed New Chat button from ChatView header
+- Removed mobile Sheet for sessions from ChatView header
+- Kept SessionsView in view-router (still accessible programmatically)
+
+Stage Summary:
+- Sidebar now contains: Brand → Nav Items → Separator → Chat History (New Chat + 8 recent sessions) → Separator → Status/Theme/DarkMode
+- Chat area now uses 100% of available width (no more left panel taking 256-288px)
+- No new lint errors introduced

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from 'next-themes';
 import {
@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Wrench,
   Zap,
-  History,
   Brain,
   Settings,
   Clock,
@@ -16,7 +15,12 @@ import {
   Moon,
   Menu,
   PanelLeftClose,
+  Plus,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Trash2,
 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { useAppStore, type SidebarView, type ThemeStyle } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,6 +35,23 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
@@ -48,7 +69,6 @@ const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, emoji: '📊' },
   { id: 'tools', label: 'Tools', icon: Wrench, emoji: '🔧' },
   { id: 'skills', label: 'Skills', icon: Zap, emoji: '⚡' },
-  { id: 'sessions', label: 'Sessions', icon: History, emoji: '📋' },
   { id: 'memory', label: 'Memory', icon: Brain, emoji: '🧠' },
   { id: 'settings', label: 'Settings', icon: Settings, emoji: '⚙️' },
   { id: 'cronjobs', label: 'Cron Jobs', icon: Clock, emoji: '⏰' },
@@ -305,6 +325,198 @@ function SidebarNavItem({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Chat History Section                                               */
+/* ------------------------------------------------------------------ */
+function ChatHistorySection({
+  collapsed,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: (id: SidebarView) => void;
+}) {
+  const [sessions, setSessions] = useState<Array<{
+    id: string;
+    title: string;
+    updatedAt: string;
+    model?: string;
+  }>>([]);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const currentView = useAppStore((s) => s.currentView);
+  const currentSessionId = useAppStore((s) => s.currentSessionId);
+  const setCurrentView = useAppStore((s) => s.setCurrentView);
+  const setCurrentSessionId = useAppStore((s) => s.setCurrentSessionId);
+  const clearMessages = useAppStore((s) => s.clearMessages);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sessions');
+      const data = await res.json();
+      const list = (Array.isArray(data) ? data : []).slice(0, 8);
+      setSessions(list.map((s: any) => ({
+        id: s.id,
+        title: s.title || 'New Chat',
+        updatedAt: s.updatedAt,
+        model: s.model,
+      })));
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { fetchSessions(); }, [fetchSessions]);
+
+  // Refresh sessions when switching to chat view
+  useEffect(() => {
+    if (currentView === 'chat') fetchSessions();
+  }, [currentView, fetchSessions]);
+
+  const handleNewChat = () => {
+    clearMessages();
+    setCurrentSessionId(null);
+    if (currentView !== 'chat') {
+      setCurrentView('chat');
+    }
+    onNavigate?.('chat');
+  };
+
+  const handleSelectSession = (id: string) => {
+    setCurrentSessionId(id);
+    if (currentView !== 'chat') {
+      setCurrentView('chat');
+    }
+    onNavigate?.('chat');
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/sessions/${deleteTarget.id}`, { method: 'DELETE' });
+      toast.success('Session deleted');
+      fetchSessions();
+      if (currentSessionId === deleteTarget.id) {
+        clearMessages();
+        setCurrentSessionId(null);
+      }
+    } catch {
+      toast.error('Failed to delete');
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
+  if (collapsed) {
+    return (
+      <div className="py-2 px-2 flex flex-col items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" onClick={handleNewChat}>
+              <MessageSquarePlus className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>New Chat</TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col max-h-[40vh] min-h-0">
+      {/* New Chat Button */}
+      <div className="px-2 pt-2 pb-1">
+        <Button
+          onClick={handleNewChat}
+          variant="outline"
+          className="w-full gap-2 h-8 text-xs justify-start font-medium"
+        >
+          <Plus className="size-3.5" />
+          New Chat
+        </Button>
+      </div>
+
+      {/* Recent Sessions */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-1.5 pb-1 space-y-0.5 min-h-0">
+        {sessions.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground text-center py-3 px-2">
+            No sessions yet
+          </p>
+        ) : (
+          sessions.map((session) => {
+            const isActive = currentSessionId === session.id;
+            const timeAgo = formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true });
+            return (
+              <div
+                key={session.id}
+                onClick={() => handleSelectSession(session.id)}
+                className={cn(
+                  'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
+                  isActive
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                )}
+              >
+                <span className="flex-1 min-w-0 text-[11px] font-medium truncate leading-tight">
+                  {session.title}
+                </span>
+                <span className="text-[9px] text-muted-foreground/60 shrink-0 hidden group-hover:hidden">
+                  {timeAgo}
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-4 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="size-2.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-28">
+                    <DropdownMenuItem
+                      className="text-destructive text-xs gap-1.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget({ id: session.id, title: session.title });
+                      }}
+                    >
+                      <Trash2 className="size-3" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm">Delete session?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              &quot;{deleteTarget?.title}&quot; will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="text-xs h-7" onClick={() => setDeleteTarget(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="text-xs h-7 bg-destructive hover:bg-destructive/90"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Sidebar Content (shared between desktop & mobile)                  */
 /* ------------------------------------------------------------------ */
 function SidebarContent({
@@ -343,6 +555,11 @@ function SidebarContent({
           />
         ))}
       </nav>
+
+      <Separator />
+
+      {/* Chat History — New Chat + Recent Sessions */}
+      <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
 
       <Separator />
 
