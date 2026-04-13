@@ -93,13 +93,17 @@ function HermesLogo({ collapsed }: { collapsed?: boolean }) {
     <div className="flex items-center gap-3">
       <motion.div
         className="relative flex items-center justify-center shrink-0"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        whileHover={{ scale: 1.08, rotate: 3 }}
+        whileTap={{ scale: 0.92 }}
       >
-        {/* Outer glow ring */}
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/20 via-primary/5 to-transparent blur-sm" />
-        {/* Main orb */}
-        <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center shadow-lg shadow-primary/20">
+        {/* Animated outer glow ring */}
+        <motion.div
+          className="absolute inset-[-3px] rounded-2xl bg-gradient-to-br from-primary/40 via-primary/10 to-transparent"
+          animate={{ opacity: [0.6, 1, 0.6], scale: [1, 1.05, 1] }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        {/* Main orb with refined gradient */}
+        <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary via-primary/95 to-primary/85 flex items-center justify-center shadow-lg shadow-primary/25 ring-1 ring-white/10">
           {/* Winged helmet SVG */}
           <svg
             viewBox="0 0 24 24"
@@ -110,13 +114,9 @@ function HermesLogo({ collapsed }: { collapsed?: boolean }) {
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            {/* Helmet dome */}
             <path d="M12 3C8 3 5 6 4.5 10L4 13H20L19.5 10C19 6 16 3 12 3Z" />
-            {/* Helmet brim */}
             <path d="M3 13C3 13 4 15 12 15C20 15 21 13 21 13" />
-            {/* Left wing */}
             <path d="M4.5 10L2 8.5C1.5 8 1 8.5 1.5 9L4.5 12" />
-            {/* Right wing */}
             <path d="M19.5 10L22 8.5C22.5 8 23 8.5 22.5 9L19.5 12" />
           </svg>
         </div>
@@ -125,13 +125,13 @@ function HermesLogo({ collapsed }: { collapsed?: boolean }) {
         <motion.div
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.2, delay: 0.05 }}
+          transition={{ duration: 0.3, delay: 0.05, ease: 'easeOut' }}
           className="flex flex-col"
         >
           <span className="text-sm font-bold tracking-tight text-foreground leading-none">
             Hermes
           </span>
-          <span className="text-[10px] font-medium text-muted-foreground leading-none mt-0.5">
+          <span className="text-[10px] font-medium text-muted-foreground/80 leading-none mt-0.5">
             AI Agent Platform
           </span>
         </motion.div>
@@ -280,33 +280,39 @@ function SidebarNavItem({
     <motion.button
       onClick={() => onSelect(item.id)}
       className={cn(
-        'group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
+        'group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-200',
         collapsed ? 'justify-center px-0' : '',
         isActive
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+          ? 'bg-accent/80 text-accent-foreground shadow-sm'
+          : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
       )}
-      whileHover={{ x: 2 }}
-      whileTap={{ scale: 0.98 }}
+      whileHover={{ x: 3 }}
+      whileTap={{ scale: 0.97 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
       {/* Active indicator bar */}
       {isActive && (
         <motion.div
           layoutId="sidebar-active-indicator"
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-full"
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-gradient-to-b from-primary via-primary/80 to-primary/50 rounded-full"
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
       )}
 
       <Icon
         className={cn(
-          'size-[18px] shrink-0 transition-colors',
-          isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground',
+          'size-[18px] shrink-0 transition-all duration-200',
+          isActive
+            ? 'text-primary drop-shadow-sm'
+            : 'text-muted-foreground group-hover:text-foreground',
         )}
       />
       {!collapsed && (
         <span className="truncate">{item.label}</span>
+      )}
+      {/* Hover glow effect */}
+      {!collapsed && !isActive && (
+        <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       )}
     </motion.button>
   );
@@ -474,15 +480,23 @@ function ChatHistorySection({
 
   return (
     <div className="flex flex-col max-h-[40vh] min-h-0">
+      {/* Section Label */}
+      <div className="px-3 pt-3 pb-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Recent Chats</span>
+      </div>
       {/* New Chat Button */}
-      <div className="px-2 pt-2 pb-1">
+      <div className="px-2 pb-1">
         <Button
           onClick={handleNewChat}
           variant="outline"
-          className="w-full gap-2 h-8 text-xs justify-start font-medium"
+          className={cn(
+            'w-full gap-2 h-8 text-xs justify-start font-medium',
+            'border-dashed border-primary/30 hover:border-primary/50 hover:bg-primary/5',
+            'transition-all duration-200 group/newchat',
+          )}
         >
-          <Plus className="size-3.5" />
-          New Chat
+          <Plus className="size-3.5 text-primary/70 group-hover/newchat:text-primary transition-colors" />
+          <span className="text-muted-foreground group-hover/newchat:text-foreground transition-colors">New Chat</span>
         </Button>
       </div>
 
@@ -501,10 +515,10 @@ function ChatHistorySection({
                 key={session.id}
                 onClick={() => handleSelectSession(session.id)}
                 className={cn(
-                  'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
+                  'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200',
                   isActive
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                    ? 'bg-accent/80 text-accent-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
                   loadingSession && 'pointer-events-none opacity-60'
                 )}
               >
@@ -596,10 +610,16 @@ function SidebarContent({
         <HermesLogo collapsed={collapsed} />
       </div>
 
-      <Separator />
+      <Separator className="opacity-60" />
 
       {/* Navigation + Chat History (scrollable as one unit) */}
       <nav className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 space-y-0.5 flex flex-col">
+        {/* Navigation section label */}
+        {!collapsed && (
+          <div className="px-2.5 pt-1 pb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Navigation</span>
+          </div>
+        )}
         <div className="space-y-0.5">
           {navItems.map((item) => (
             <SidebarNavItem
@@ -613,15 +633,15 @@ function SidebarContent({
         </div>
 
         {/* Chat History — New Chat + Recent Sessions, directly below Cron Jobs */}
-        <div className="pt-2">
+        <div className="pt-3">
           <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
         </div>
       </nav>
 
-      <Separator />
+      <Separator className="opacity-40" />
 
-      {/* Bottom section */}
-      <div className="shrink-0 py-3 px-2 space-y-3">
+      {/* Bottom section with subtle background */}
+      <div className="shrink-0 py-3 px-2 space-y-3 bg-gradient-to-t from-muted/20 to-transparent">
         {/* Agent Status */}
         <StatusIndicator collapsed={collapsed} />
 
@@ -675,7 +695,7 @@ export function Sidebar() {
 
       {/* Desktop sidebar */}
       <motion.aside
-        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border bg-sidebar/80 backdrop-blur-sm overflow-hidden shrink-0"
+        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border/60 bg-sidebar/90 backdrop-blur-xl overflow-hidden shrink-0 shadow-sm"
         animate={{ width: collapsed ? 56 : 240 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >

@@ -298,8 +298,9 @@ function AgentStatusCard() {
   const Icon = config.icon;
 
   return (
-    <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+    <motion.div
+      variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
+      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
         <CardContent className="p-5 flex items-start justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -331,7 +332,7 @@ function TotalSessionsCard({ total, todayCount, loading }: { total: number; toda
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
         <CardContent className="p-5 flex items-start justify-between">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Total Sessions</p>
@@ -363,7 +364,7 @@ function MessagesTodayCard({ total, loading }: { total: number; loading: boolean
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
         <CardContent className="p-5 flex items-start justify-between">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Total Messages</p>
@@ -397,7 +398,7 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
         <CardContent className="p-5 flex items-start justify-between">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Tokens Used</p>
@@ -817,24 +818,28 @@ function EmptyDashboard() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col items-center justify-center py-20 px-4"
+      className="flex flex-col items-center justify-center py-20 px-4 relative overflow-hidden"
     >
+      {/* Background decoration */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute w-[400px] h-[400px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-primary/[0.04] to-transparent blur-3xl" />
+      </div>
       <motion.div
-        className="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-6"
+        className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-muted/80 to-muted/40 flex items-center justify-center mb-6 shadow-sm"
         animate={{ rotate: [0, 5, -5, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
       >
-        <Activity className="w-9 h-9 text-muted-foreground" />
+        <Activity className="w-9 h-9 text-muted-foreground/70" />
       </motion.div>
-      <h3 className="text-lg font-semibold mb-2">Welcome to Hermes Dashboard</h3>
-      <p className="text-sm text-muted-foreground text-center max-w-sm mb-8">
+      <h3 className="text-lg font-semibold mb-2 relative z-10">Welcome to Hermes Dashboard</h3>
+      <p className="text-sm text-muted-foreground text-center max-w-sm mb-8 relative z-10">
         Your mission control center is ready. Start chatting with your agent to see real-time stats, activity charts, and session history appear here.
       </p>
       <motion.button
         onClick={() => setCurrentView('chat')}
-        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        className="relative inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/25 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+        whileHover={{ scale: 1.03 }}
+        whileTap={{ scale: 0.97 }}
       >
         <MessageSquare className="w-4 h-4" />
         Start Your First Chat

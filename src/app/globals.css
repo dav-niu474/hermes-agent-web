@@ -367,19 +367,34 @@
   }
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar — premium thin style */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.7 0 0 / 30%);
-  border-radius: 3px;
+  background: oklch(0.7 0 0 / 20%);
+  border-radius: 10px;
+  transition: background 0.2s;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.55 0 0 / 35%);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:active {
+  background: oklch(0.45 0 0 / 45%);
+}
+
+/* Dark mode scrollbar */
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.4 0 0 / 25%);
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: oklch(0.5 0 0 / 40%);
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:active {
+  background: oklch(0.6 0 0 / 50%);
 }
 
 /* Markdown styles */
@@ -428,6 +443,7 @@
   content: '▋';
   animation: blink 1s infinite;
   color: var(--primary);
+  font-weight: 300;
 }
 
 /* Pulsing dots animation for running tool calls */
@@ -469,7 +485,12 @@
 }
 
 /* Smooth transitions for theme switching — only on themed containers */
-body, main, aside, header, nav, section, article, div, span, p {
+body, main, aside, header, nav, section, article {
+  transition-property: background-color, border-color;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
+}
+div, span, p {
   transition-property: background-color, border-color, color;
   transition-duration: 200ms;
   transition-timing-function: ease;
@@ -477,7 +498,7 @@ body, main, aside, header, nav, section, article, div, span, p {
 
 /* Override transition for interactive elements that need instant response */
 button, a, input, [role="button"], label {
-  transition-property: background-color, border-color, color, box-shadow, transform;
+  transition-property: background-color, border-color, color, box-shadow, transform, opacity;
   transition-duration: 150ms;
 }
 
@@ -485,4 +506,35 @@ button, a, input, [role="button"], label {
 .overflow-y-auto, .overflow-auto {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ─── Selection Color ─── */
+::selection {
+  background: oklch(0.75 0.12 264 / 25%);
+}
+
+/* ─── Focus Visible Ring ─── */
+:focus-visible {
+  outline: 2px solid oklch(0.55 0.02 264 / 50%);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* ─── Subtle gradient overlay for depth ─── */
+@layer utilities {
+  .glass-subtle {
+    background: linear-gradient(
+      135deg,
+      oklch(1 0 0 / 0.6),
+      oklch(1 0 0 / 0.4)
+    );
+    backdrop-filter: blur(12px) saturate(1.5);
+  }
+  .dark .glass-subtle {
+    background: linear-gradient(
+      135deg,
+      oklch(0.2 0 0 / 0.6),
+      oklch(0.2 0 0 / 0.4)
+    );
+  }
 }
