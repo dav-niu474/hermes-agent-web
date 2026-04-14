@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
 import {
   MessageSquare,
@@ -15,6 +15,7 @@ import {
   Moon,
   Menu,
   PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   MessageSquarePlus,
   MoreHorizontal,
@@ -208,7 +209,7 @@ function ThemeStyleSwitcher({ collapsed }: { collapsed?: boolean }) {
           key={t.id}
           onClick={() => setThemeStyle(t.id)}
           className={cn(
-            'w-4 h-4 rounded-full transition-all duration-150',
+            'w-4 h-4 rounded-full transition-all duration-200',
             t.color,
             themeStyle === t.id
               ? `ring-2 ${t.ring} scale-110`
@@ -237,15 +238,25 @@ function DarkModeToggle({ collapsed }: { collapsed?: boolean }) {
           size={collapsed ? 'icon' : 'sm'}
           onClick={() => setTheme(isDark ? 'light' : 'dark')}
           className={cn(
-            'h-8 w-full gap-2 px-2 text-muted-foreground hover:text-foreground',
+            'h-8 w-full gap-2 px-2 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-lg transition-colors',
             collapsed && 'w-8 justify-center',
           )}
         >
-          {isDark ? (
-            <Sun className="size-4 shrink-0" />
-          ) : (
-            <Moon className="size-4 shrink-0" />
-          )}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={isDark ? 'dark' : 'light'}
+              initial={{ rotate: -90, opacity: 0 }}
+              animate={{ rotate: 0, opacity: 1 }}
+              exit={{ rotate: 90, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {isDark ? (
+                <Sun className="size-4 shrink-0" />
+              ) : (
+                <Moon className="size-4 shrink-0" />
+              )}
+            </motion.div>
+          </AnimatePresence>
           {!collapsed && (
             <span className="text-xs font-medium truncate">
               {isDark ? 'Light Mode' : 'Dark Mode'}
@@ -280,13 +291,13 @@ function SidebarNavItem({
     <motion.button
       onClick={() => onSelect(item.id)}
       className={cn(
-        'group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-200',
+        'group relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-all duration-200',
         collapsed ? 'justify-center px-0' : '',
         isActive
-          ? 'bg-accent/80 text-accent-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+          ? 'bg-primary/10 text-primary shadow-sm'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
       )}
-      whileHover={{ x: 3 }}
+      whileHover={{ x: collapsed ? 0 : 2 }}
       whileTap={{ scale: 0.97 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
@@ -294,7 +305,7 @@ function SidebarNavItem({
       {isActive && (
         <motion.div
           layoutId="sidebar-active-indicator"
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-gradient-to-b from-primary via-primary/80 to-primary/50 rounded-full"
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-full"
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
       )}
@@ -303,7 +314,7 @@ function SidebarNavItem({
         className={cn(
           'size-[18px] shrink-0 transition-all duration-200',
           isActive
-            ? 'text-primary drop-shadow-sm'
+            ? 'text-primary'
             : 'text-muted-foreground group-hover:text-foreground',
         )}
       />
@@ -312,7 +323,7 @@ function SidebarNavItem({
       )}
       {/* Hover glow effect */}
       {!collapsed && !isActive && (
-        <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       )}
     </motion.button>
   );
@@ -380,7 +391,7 @@ function ChatHistorySection({
     if (currentView === 'chat') fetchSessions();
   }, [currentView, fetchSessions]);
 
-  // Listen for custom event to refresh sessions (dispatched by ChatView after sending messages)
+  // Listen for custom event to refresh sessions
   useEffect(() => {
     const handler = () => fetchSessions();
     window.addEventListener('hermes:refresh-sessions', handler);
@@ -398,7 +409,6 @@ function ChatHistorySection({
 
   const handleSelectSession = async (id: string) => {
     if (loadingSession || id === currentSessionId) {
-      // If already selected, just ensure we're on chat view
       if (currentView !== 'chat') {
         setCurrentView('chat');
         onNavigate?.('chat');
@@ -414,7 +424,6 @@ function ChatHistorySection({
       clearMessages();
       setCurrentSessionId(id);
 
-      // Restore messages to store
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       for (const m of msgs) {
         addChatMessage({
@@ -428,7 +437,6 @@ function ChatHistorySection({
         });
       }
 
-      // Restore model selection
       if (data.model && data.model !== 'hermes-agent') {
         setSelectedModel(data.model);
       }
@@ -468,7 +476,7 @@ function ChatHistorySection({
       <div className="py-2 px-2 flex flex-col items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8" onClick={handleNewChat}>
+            <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={handleNewChat}>
               <MessageSquarePlus className="size-4" />
             </Button>
           </TooltipTrigger>
@@ -482,7 +490,7 @@ function ChatHistorySection({
     <div className="flex flex-col max-h-[40vh] min-h-0">
       {/* Section Label */}
       <div className="px-3 pt-3 pb-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Recent Chats</span>
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Recent Chats</span>
       </div>
       {/* New Chat Button */}
       <div className="px-2 pb-1">
@@ -490,7 +498,7 @@ function ChatHistorySection({
           onClick={handleNewChat}
           variant="outline"
           className={cn(
-            'w-full gap-2 h-8 text-xs justify-start font-medium',
+            'w-full gap-2 h-8 text-xs justify-start font-medium rounded-lg',
             'border-dashed border-primary/30 hover:border-primary/50 hover:bg-primary/5',
             'transition-all duration-200 group/newchat',
           )}
@@ -503,60 +511,71 @@ function ChatHistorySection({
       {/* Recent Sessions */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-1.5 pb-1 space-y-0.5 min-h-0">
         {sessions.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground text-center py-3 px-2">
+          <p className="text-[11px] text-muted-foreground/50 text-center py-3 px-2">
             No sessions yet
           </p>
         ) : (
-          sessions.map((session) => {
-            const isActive = currentSessionId === session.id;
-            const timeAgo = formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true });
-            return (
-              <div
-                key={session.id}
-                onClick={() => handleSelectSession(session.id)}
-                className={cn(
-                  'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200',
-                  isActive
-                    ? 'bg-accent/80 text-accent-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                  loadingSession && 'pointer-events-none opacity-60'
-                )}
-              >
-                {loadingSession && isActive && (
-                  <Loader2 className="size-3 animate-spin shrink-0 text-muted-foreground" />
-                )}
-                <span className="flex-1 min-w-0 text-[11px] font-medium truncate leading-tight">
-                  {session.title}
-                </span>
-                <span className="text-[9px] text-muted-foreground/60 shrink-0 hidden group-hover:block">
-                  {timeAgo}
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-4 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreHorizontal className="size-2.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-28">
-                    <DropdownMenuItem
-                      className="text-destructive text-xs gap-1.5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget({ id: session.id, title: session.title });
-                      }}
-                    >
-                      <Trash2 className="size-3" /> Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            );
-          })
+          <AnimatePresence>
+            {sessions.map((session, index) => {
+              const isActive = currentSessionId === session.id;
+              const timeAgo = formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true });
+              return (
+                <motion.div
+                  key={session.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.03, duration: 0.2 }}
+                  onClick={() => handleSelectSession(session.id)}
+                  className={cn(
+                    'group flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-200',
+                    isActive
+                      ? 'bg-primary/10 text-primary shadow-sm'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                    loadingSession && 'pointer-events-none opacity-60'
+                  )}
+                >
+                  {loadingSession && isActive && (
+                    <Loader2 className="size-3 animate-spin shrink-0 text-muted-foreground" />
+                  )}
+                  {!loadingSession && (
+                    <MessageSquare className={cn(
+                      'size-3 shrink-0',
+                      isActive ? 'text-primary/70' : 'text-muted-foreground/40'
+                    )} />
+                  )}
+                  <span className="flex-1 min-w-0 text-[11px] font-medium truncate leading-tight">
+                    {session.title}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/40 shrink-0 hidden group-hover:block">
+                    {timeAgo}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-4 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive rounded"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal className="size-2.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-28">
+                      <DropdownMenuItem
+                        className="text-destructive text-xs gap-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget({ id: session.id, title: session.title });
+                        }}
+                      >
+                        <Trash2 className="size-3" /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
         )}
       </div>
 
@@ -610,16 +629,11 @@ function SidebarContent({
         <HermesLogo collapsed={collapsed} />
       </div>
 
-      <Separator className="opacity-60" />
+      <Separator className="opacity-50" />
 
       {/* Navigation + Chat History (scrollable as one unit) */}
       <nav className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 space-y-0.5 flex flex-col">
-        {/* Navigation section label */}
-        {!collapsed && (
-          <div className="px-2.5 pt-1 pb-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Navigation</span>
-          </div>
-        )}
+        {/* Navigation section */}
         <div className="space-y-0.5">
           {navItems.map((item) => (
             <SidebarNavItem
@@ -633,15 +647,16 @@ function SidebarContent({
         </div>
 
         {/* Chat History — New Chat + Recent Sessions, directly below Cron Jobs */}
-        <div className="pt-3">
+        <div className="pt-2">
+          <Separator className="opacity-30 mb-2" />
           <ChatHistorySection collapsed={collapsed} onNavigate={onNavigate} />
         </div>
       </nav>
 
-      <Separator className="opacity-40" />
+      <Separator className="opacity-30" />
 
       {/* Bottom section with subtle background */}
-      <div className="shrink-0 py-3 px-2 space-y-3 bg-gradient-to-t from-muted/20 to-transparent">
+      <div className="shrink-0 py-3 px-2 space-y-2.5 bg-gradient-to-t from-muted/30 to-transparent">
         {/* Agent Status */}
         <StatusIndicator collapsed={collapsed} />
 
@@ -695,7 +710,7 @@ export function Sidebar() {
 
       {/* Desktop sidebar */}
       <motion.aside
-        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border/60 bg-sidebar/90 backdrop-blur-xl overflow-hidden shrink-0 shadow-sm"
+        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border/50 bg-sidebar/95 backdrop-blur-xl overflow-hidden shrink-0"
         animate={{ width: collapsed ? 56 : 240 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >
@@ -710,11 +725,15 @@ export function Sidebar() {
                 size="icon"
                 onClick={toggleSidebar}
                 className={cn(
-                  'h-7 w-7 rounded-md text-muted-foreground hover:text-foreground',
+                  'h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors',
                   collapsed && 'absolute -right-1 top-0',
                 )}
               >
-                <PanelLeftClose className="size-3.5" />
+                {collapsed ? (
+                  <PanelLeftOpen className="size-3.5" />
+                ) : (
+                  <PanelLeftClose className="size-3.5" />
+                )}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={8}>

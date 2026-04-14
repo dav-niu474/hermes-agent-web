@@ -229,7 +229,9 @@ function CircularProgress({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <Icon className="w-5 h-5 text-muted-foreground" />
+          <div className="w-10 h-10 rounded-full bg-background/80 flex items-center justify-center">
+            <Icon className="w-5 h-5 text-muted-foreground" />
+          </div>
         </div>
       </div>
       <div className="text-center">
@@ -300,8 +302,8 @@ function AgentStatusCard() {
   return (
     <motion.div
       variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
-        <CardContent className="p-5 flex items-start justify-between">
+      <Card className="h-full hover:shadow-xl hover:shadow-primary/[0.06] transition-all duration-300 border-border/50">
+        <CardContent className="p-5 flex items-start justify-between hover:bg-gradient-to-br from-transparent to-primary/[0.02] transition-colors duration-300 rounded-lg">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-muted-foreground">Agent Status</span>
@@ -318,7 +320,7 @@ function AgentStatusCard() {
                   : 'Agent is not connected'}
             </p>
           </div>
-          <div className={cn('p-2.5 rounded-xl', config.bg)}>
+          <div className={cn('p-3 rounded-xl', config.bg)}>
             <Icon className={cn('w-5 h-5', config.color)} />
           </div>
         </CardContent>
@@ -332,15 +334,15 @@ function TotalSessionsCard({ total, todayCount, loading }: { total: number; toda
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
-        <CardContent className="p-5 flex items-start justify-between">
+      <Card className="h-full hover:shadow-xl hover:shadow-primary/[0.06] transition-all duration-300 border-border/50">
+        <CardContent className="p-5 flex items-start justify-between hover:bg-gradient-to-br from-transparent to-primary/[0.02] transition-colors duration-300 rounded-lg">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Total Sessions</p>
             <div className="flex items-baseline gap-2">
               {loading ? (
                 <div className="h-8 w-12 bg-muted rounded animate-pulse" />
               ) : (
-                <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
+                <span className="text-3xl font-bold tracking-tight tabular-nums">{displayTotal}</span>
               )}
             </div>
             <div className="flex items-center gap-1.5">
@@ -350,7 +352,7 @@ function TotalSessionsCard({ total, todayCount, loading }: { total: number; toda
               </Badge>
             </div>
           </div>
-          <div className="p-2.5 rounded-xl bg-chart-4/15">
+          <div className="p-3 rounded-xl bg-chart-4/15">
             <MessageSquare className="w-5 h-5 text-chart-4" />
           </div>
         </CardContent>
@@ -364,22 +366,22 @@ function MessagesTodayCard({ total, loading }: { total: number; loading: boolean
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
-        <CardContent className="p-5 flex items-start justify-between">
+      <Card className="h-full hover:shadow-xl hover:shadow-primary/[0.06] transition-all duration-300 border-border/50">
+        <CardContent className="p-5 flex items-start justify-between hover:bg-gradient-to-br from-transparent to-primary/[0.02] transition-colors duration-300 rounded-lg">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Total Messages</p>
             <div className="flex items-baseline gap-2">
               {loading ? (
                 <div className="h-8 w-12 bg-muted rounded animate-pulse" />
               ) : (
-                <span className="text-3xl font-bold tracking-tight">{displayTotal}</span>
+                <span className="text-3xl font-bold tracking-tight tabular-nums">{displayTotal}</span>
               )}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-muted-foreground">Across all sessions</span>
             </div>
           </div>
-          <div className="p-2.5 rounded-xl bg-chart-1/15">
+          <div className="p-3 rounded-xl bg-chart-1/15">
             <Activity className="w-5 h-5 text-chart-1" />
           </div>
         </CardContent>
@@ -398,8 +400,8 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
-      <Card className="h-full hover:shadow-lg hover:shadow-primary/[0.04] transition-all duration-300 border-border/50">
-        <CardContent className="p-5 flex items-start justify-between">
+      <Card className="h-full hover:shadow-xl hover:shadow-primary/[0.06] transition-all duration-300 border-border/50">
+        <CardContent className="p-5 flex items-start justify-between hover:bg-gradient-to-br from-transparent to-primary/[0.02] transition-colors duration-300 rounded-lg">
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Tokens Used</p>
             <div className="flex items-baseline gap-2">
@@ -407,7 +409,7 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
                 <div className="h-8 w-12 bg-muted rounded animate-pulse" />
               ) : (
                 <>
-                  <span className="text-3xl font-bold tracking-tight">{displayTotal >= 1000 ? formatted : displayTotal}</span>
+                  <span className="text-3xl font-bold tracking-tight tabular-nums">{displayTotal >= 1000 ? formatted : displayTotal}</span>
                   {total < 1000 && <span className="text-sm text-muted-foreground">tokens</span>}
                 </>
               )}
@@ -416,7 +418,7 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
               <span className="text-xs text-muted-foreground">Cumulative usage</span>
             </div>
           </div>
-          <div className="p-2.5 rounded-xl bg-chart-2/15">
+          <div className="p-3 rounded-xl bg-chart-2/15">
             <Wrench className="w-5 h-5 text-chart-2" />
           </div>
         </CardContent>
@@ -430,6 +432,9 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
    ═══════════════════════════════════════════ */
 
 function ActivityChartCard() {
+  const barHeights = [65, 40, 80, 55, 90, 70, 45];
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
   return (
     <motion.div variants={itemVariants}>
       <Card className="h-full hover:shadow-md transition-shadow duration-200">
@@ -448,14 +453,51 @@ function ActivityChartCard() {
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="h-[220px] flex flex-col items-center justify-center text-center">
-            <div className="p-3 rounded-full bg-muted/50 mb-3">
-              <BarChart3 className="w-6 h-6 text-muted-foreground" />
+          <div className="h-[220px] flex flex-col items-center justify-center">
+            <svg viewBox="0 0 280 160" className="w-full max-w-[280px] h-auto" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <linearGradient id="barGrad0" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity="0.7" />
+                  <stop offset="100%" stopColor="hsl(var(--chart-1))" stopOpacity="0.25" />
+                </linearGradient>
+                <linearGradient id="barGrad1" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--chart-2))" stopOpacity="0.7" />
+                  <stop offset="100%" stopColor="hsl(var(--chart-2))" stopOpacity="0.25" />
+                </linearGradient>
+              </defs>
+              {/* Baseline */}
+              <line x1="10" y1="130" x2="270" y2="130" stroke="currentColor" strokeOpacity="0.1" strokeWidth="1" />
+              {barHeights.map((h, i) => (
+                <g key={i}>
+                  <motion.rect
+                    x={10 + i * 38}
+                    y={130}
+                    width={24}
+                    height={0}
+                    rx={4}
+                    fill={i % 2 === 0 ? 'url(#barGrad0)' : 'url(#barGrad1)'}
+                    initial={{ height: 0, y: 130 }}
+                    animate={{ height: h * 1.1, y: 130 - h * 1.1 }}
+                    transition={{ duration: 0.8, delay: 0.2 + i * 0.08, ease: 'easeOut' }}
+                  />
+                  <text
+                    x={22 + i * 38}
+                    y={148}
+                    textAnchor="middle"
+                    className="fill-muted-foreground/50"
+                    fontSize="9"
+                  >
+                    {dayLabels[i]}
+                  </text>
+                </g>
+              ))}
+            </svg>
+            <div className="text-center mt-1">
+              <p className="text-xs font-medium text-muted-foreground">Historical chart data</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                Daily activity tracking will appear here as you use the agent over time.
+              </p>
             </div>
-            <p className="text-sm font-medium text-muted-foreground">Historical chart data</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
-              Daily activity tracking will appear here as you use the agent over time.
-            </p>
           </div>
         </CardContent>
       </Card>
@@ -525,7 +567,7 @@ function SystemResourcesCard() {
                 </div>
                 <span className="text-xs text-muted-foreground">{res.sublabel}</span>
               </div>
-              <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+              <div className="relative h-2.5 bg-muted rounded-full overflow-hidden">
                 <motion.div
                   className={cn('absolute inset-y-0 left-0 rounded-full', res.barColor)}
                   initial={{ width: 0 }}
@@ -647,18 +689,21 @@ function RecentSessionsTable({ sessions, loading, onRefresh }: { sessions: ApiSt
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="pl-6">Title</TableHead>
-                    <TableHead className="hidden sm:table-cell">Model</TableHead>
-                    <TableHead className="hidden md:table-cell">Messages</TableHead>
-                    <TableHead className="hidden lg:table-cell">Last Active</TableHead>
-                    <TableHead className="pr-6">Status</TableHead>
+                    <TableHead className="pl-6 font-semibold">Title</TableHead>
+                    <TableHead className="hidden sm:table-cell font-semibold">Model</TableHead>
+                    <TableHead className="hidden md:table-cell font-semibold">Messages</TableHead>
+                    <TableHead className="hidden lg:table-cell font-semibold">Last Active</TableHead>
+                    <TableHead className="pr-6 font-semibold">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sessions.slice(0, 8).map((session) => (
+                  {sessions.slice(0, 8).map((session, idx) => (
                     <TableRow
                       key={session.id}
-                      className="cursor-pointer"
+                      className={cn(
+                        'cursor-pointer hover:bg-muted/30 transition-colors duration-150',
+                        idx % 2 === 1 && 'bg-muted/20'
+                      )}
                       onClick={() => {
                         setCurrentSessionId(session.id);
                         setCurrentView('chat');
@@ -781,8 +826,8 @@ function QuickActionsGrid() {
                 key={action.view}
                 onClick={() => setCurrentView(action.view)}
                 className={cn(
-                  'group flex flex-col items-center gap-2.5 p-4 rounded-xl border border-border/50',
-                  'bg-card hover:bg-accent/50 transition-all duration-200',
+                  'group relative flex flex-col items-center gap-2.5 p-4 rounded-xl border border-border/50',
+                  'bg-card hover:bg-gradient-to-br hover:from-accent/60 hover:to-accent/30 transition-all duration-200',
                   'hover:border-border hover:shadow-sm'
                 )}
                 whileHover={{ y: -2, scale: 1.02 }}
@@ -791,13 +836,21 @@ function QuickActionsGrid() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5 + i * 0.06, duration: 0.3 }}
               >
-                <div className={cn('p-2.5 rounded-xl transition-colors group-hover:scale-110', action.bg)}>
+                <div className={cn('p-3 rounded-xl transition-colors group-hover:scale-110', action.bg)}>
                   <action.icon className={cn('w-5 h-5 transition-colors', action.color)} />
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-medium">{action.label}</p>
                   <p className="text-[11px] text-muted-foreground">{action.description}</p>
                 </div>
+                <motion.div
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/40 group-hover:text-muted-foreground"
+                  initial={{ opacity: 0, x: -4 }}
+                  whileHover={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </motion.div>
               </motion.button>
             ))}
           </div>
@@ -825,11 +878,11 @@ function EmptyDashboard() {
         <div className="absolute w-[400px] h-[400px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-primary/[0.04] to-transparent blur-3xl" />
       </div>
       <motion.div
-        className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-muted/80 to-muted/40 flex items-center justify-center mb-6 shadow-sm"
-        animate={{ rotate: [0, 5, -5, 0] }}
-        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+        className="relative w-24 h-24 rounded-2xl bg-gradient-to-br from-muted/80 to-muted/40 flex items-center justify-center mb-6 shadow-lg shadow-muted/20"
+        animate={{ y: [0, -8, 0] }}
+        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
       >
-        <Activity className="w-9 h-9 text-muted-foreground/70" />
+        <Activity className="w-11 h-11 text-muted-foreground/70" />
       </motion.div>
       <h3 className="text-lg font-semibold mb-2 relative z-10">Welcome to Hermes Dashboard</h3>
       <p className="text-sm text-muted-foreground text-center max-w-sm mb-8 relative z-10">
@@ -837,12 +890,13 @@ function EmptyDashboard() {
       </p>
       <motion.button
         onClick={() => setCurrentView('chat')}
-        className="relative inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/25 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-        whileHover={{ scale: 1.03 }}
-        whileTap={{ scale: 0.97 }}
+        className="relative inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold shadow-xl shadow-primary/25 hover:shadow-2xl hover:shadow-primary/30 transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] ring-1 ring-primary/20"
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.96 }}
       >
         <MessageSquare className="w-4 h-4" />
         Start Your First Chat
+        <ArrowRight className="w-4 h-4 ml-0.5" />
       </motion.button>
     </motion.div>
   );
@@ -875,14 +929,76 @@ function TokenUsageMiniChart({ totalTokens }: { totalTokens: number }) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="h-[160px] flex flex-col items-center justify-center text-center">
-            <div className="p-3 rounded-full bg-muted/50 mb-3">
-              <Activity className="w-6 h-6 text-muted-foreground" />
+          <div className="h-[160px] flex flex-col items-center justify-center">
+            <svg viewBox="0 0 300 120" className="w-full max-w-[300px] h-auto" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--chart-4))" stopOpacity="0.3" />
+                  <stop offset="100%" stopColor="hsl(var(--chart-4))" stopOpacity="0.02" />
+                </linearGradient>
+                <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="hsl(var(--chart-4))" stopOpacity="0.4" />
+                  <stop offset="50%" stopColor="hsl(var(--chart-4))" stopOpacity="0.7" />
+                  <stop offset="100%" stopColor="hsl(var(--chart-4))" stopOpacity="0.5" />
+                </linearGradient>
+              </defs>
+              {/* Grid lines */}
+              {[30, 55, 80].map((y) => (
+                <line
+                  key={y}
+                  x1="20"
+                  y1={y}
+                  x2="280"
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity="0.06"
+                  strokeWidth="1"
+                />
+              ))}
+              {/* Area fill */}
+              <motion.path
+                d="M20,85 C60,70 80,40 120,50 C160,60 180,30 220,45 C240,52 260,65 280,55 L280,100 L20,100 Z"
+                fill="url(#areaGrad)"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 1.2, delay: 0.3 }}
+              />
+              {/* Line */}
+              <motion.path
+                d="M20,85 C60,70 80,40 120,50 C160,60 180,30 220,45 C240,52 260,65 280,55"
+                fill="none"
+                stroke="url(#lineGrad)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                initial={{ pathLength: 0 }}
+                animate={{ pathLength: 1 }}
+                transition={{ duration: 1.5, delay: 0.2, ease: 'easeInOut' }}
+              />
+              {/* Dot accents */}
+              {[
+                { cx: 20, cy: 85 },
+                { cx: 120, cy: 50 },
+                { cx: 220, cy: 45 },
+                { cx: 280, cy: 55 },
+              ].map((dot, i) => (
+                <motion.circle
+                  key={i}
+                  cx={dot.cx}
+                  cy={dot.cy}
+                  r={3}
+                  fill="hsl(var(--chart-4))"
+                  initial={{ r: 0, opacity: 0 }}
+                  animate={{ r: 3, opacity: 0.8 }}
+                  transition={{ duration: 0.4, delay: 0.8 + i * 0.15 }}
+                />
+              ))}
+            </svg>
+            <div className="text-center mt-1">
+              <p className="text-xs font-medium text-muted-foreground">Historical token usage</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                Daily breakdown will appear here as you use the agent.
+              </p>
             </div>
-            <p className="text-sm font-medium text-muted-foreground">Historical token usage</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
-              Daily breakdown will appear here as you use the agent.
-            </p>
           </div>
         </CardContent>
       </Card>

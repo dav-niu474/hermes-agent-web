@@ -325,7 +325,7 @@ function MediaImage({ src, alt }: { src: string; alt: string }) {
     <>
       <div className="relative mt-2 inline-block">
         {!loaded && (
-          <Skeleton className="w-[300px] max-w-full h-[200px] rounded-xl bg-muted/60" />
+          <Skeleton className="w-[360px] max-w-full h-[200px] rounded-xl bg-muted/60" />
         )}
         <img
           src={src}
@@ -333,7 +333,7 @@ function MediaImage({ src, alt }: { src: string; alt: string }) {
           loading="lazy"
           onLoad={() => setLoaded(true)}
           className={cn(
-            'max-w-[280px] sm:max-w-[300px] w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity object-contain border border-border/40',
+            'max-w-[320px] sm:max-w-[360px] w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity object-contain border border-border/40',
             loaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
           )}
           onClick={() => setExpanded(true)}
@@ -481,7 +481,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (isTool) {
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start my-2 px-4">
-        <div className="max-w-[85%] rounded-xl border border-border/60 bg-muted/30 p-3">
+        <div className="max-w-[88%] rounded-xl border border-border/60 bg-muted/30 p-3">
           <div className="flex items-center gap-2 mb-1">
             <Wrench className="size-3.5 text-muted-foreground" />
             <span className="text-xs font-mono font-medium text-muted-foreground">Tool Call</span>
@@ -498,14 +498,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
-      className={cn('group flex gap-2.5 my-3 px-4', isUser ? 'flex-row-reverse' : 'flex-row')}
+      className={cn('group flex gap-2.5 px-4', isUser ? 'my-4 flex-row-reverse' : 'my-3 flex-row')}
     >
-      <Avatar className={cn('size-7 shrink-0 mt-1', isUser ? 'bg-primary' : 'bg-muted')}>
+      <Avatar className={cn('size-8 shrink-0 mt-1', isUser ? 'bg-primary' : 'bg-muted ring-1 ring-border/50')}>
         <AvatarFallback className={cn('text-[11px]', isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
           {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
         </AvatarFallback>
       </Avatar>
-      <div className={cn('max-w-[85%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('max-w-[88%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
         {/* Thinking / Reasoning Block */}
         {!isUser && hasReasoning && (
           <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} reasoningComplete={message.reasoningComplete} />
@@ -526,9 +526,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             className={cn(
               'rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
               isUser
-                ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                ? 'bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-tr-sm'
                 : cn(
-                    'bg-card border border-border/50 rounded-tl-sm shadow-sm',
+                    'bg-card border border-border/50 border-l-2 border-l-primary/20 rounded-tl-sm shadow-sm',
                     (hasReasoning || hasToolCalls) && 'rounded-tl-lg'
                   )
             )}
@@ -633,7 +633,7 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
       >
         {/* Hero Icon with animated rings */}
         <motion.div
-          className="relative mx-auto w-20 h-20 mb-6"
+          className="relative mx-auto w-24 h-24 mb-6"
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.1, ease: 'easeOut' }}
@@ -647,8 +647,8 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
           {/* Glow layer */}
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/30 via-primary/10 to-transparent blur-xl" />
           {/* Main icon */}
-          <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-xl shadow-primary/20 ring-1 ring-white/10">
-            <svg viewBox="0 0 24 24" fill="none" className="w-10 h-10 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <div className="relative w-24 h-24 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-xl shadow-primary/20 ring-1 ring-white/10">
+            <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3C8 3 5 6 4.5 10L4 13H20L19.5 10C19 6 16 3 12 3Z" />
               <path d="M3 13C3 13 4 15 12 15C20 15 21 13 21 13" />
               <path d="M4.5 10L2 8.5C1.5 8 1 8.5 1.5 9L4.5 12" />
@@ -661,7 +661,7 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="text-2xl font-bold tracking-tight mb-2"
+          className="text-3xl font-bold tracking-tight mb-2"
         >
           Hermes Agent
         </motion.h1>
@@ -669,7 +669,7 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="text-muted-foreground text-sm mb-8 max-w-sm mx-auto"
+          className="text-muted-foreground text-base opacity-70 mb-8 max-w-sm mx-auto"
         >
           Multi-model AI assistant with tools, memory, and reasoning capabilities
         </motion.p>
@@ -689,7 +689,7 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
               className={cn(
                 'group relative flex items-start gap-2.5 p-3.5 rounded-xl text-left overflow-hidden',
                 'border border-border/40 bg-card/50 backdrop-blur-sm',
-                'hover:bg-card/80 hover:border-border/60 hover:shadow-md hover:shadow-primary/[0.03]',
+                'hover:bg-card/80 hover:border-primary/30 hover:shadow-md hover:shadow-primary/[0.03]',
                 'transition-all duration-300',
               )}
               whileHover={{ y: -2, scale: 1.01 }}
@@ -988,7 +988,7 @@ function ScrollToBottom({ onClick }: { onClick: () => void }) {
             <Button
               variant="secondary"
               size="icon"
-              className="size-8 rounded-full shadow-md border border-border/60"
+              className="size-9 rounded-full shadow-lg shadow-black/10 border border-border/60"
               onClick={onClick}
             >
               <ArrowDown className="size-3.5" />
@@ -1382,7 +1382,7 @@ export function ChatView() {
       {/* ─── Chat Area ─── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header — fixed at top */}
-        <header className="shrink-0 border-b border-border/50 bg-background/90 backdrop-blur-sm px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 z-10">
+        <header className="shrink-0 border-b border-border/50 bg-gradient-to-r from-background/95 via-background/90 to-background/95 backdrop-blur-sm px-3 sm:px-4 py-3 flex items-center justify-between gap-2 z-10">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate leading-tight">
@@ -1394,7 +1394,12 @@ export function ChatView() {
                     <Loader2 className="size-2.5 animate-spin" /> Generating...
                   </span>
                 ) : (
-                  'Hermes Agent Ready'
+                  <span className="flex items-center gap-1.5">
+                    Hermes Agent Ready
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-normal leading-tight h-4">
+                      {getModelName(selectedModel || DEFAULT_MODEL)}
+                    </Badge>
+                  </span>
                 )}
               </p>
             </div>
@@ -1433,10 +1438,10 @@ export function ChatView() {
           <div className="max-w-3xl mx-auto">
             <motion.div
               className={cn(
-                'relative flex items-end gap-1.5 rounded-2xl border p-1.5 transition-all duration-300',
+                'relative flex items-end gap-1.5 rounded-xl border p-1.5 transition-all duration-300',
                 'bg-card/60 backdrop-blur-sm',
                 isStreaming
-                  ? 'border-primary/40 shadow-[0_0_20px_rgba(var(--primary),0.1)]'
+                  ? 'border-primary/40 shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_0_20px_hsl(var(--primary)/0.1)]'
                   : 'border-border/60 shadow-sm hover:border-border/80 hover:shadow-md',
                 'focus-within:border-primary/50 focus-within:shadow-[0_0_24px_rgba(var(--primary),0.08)]',
               )}
@@ -1469,7 +1474,7 @@ export function ChatView() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Message Hermes Agent..."
-                className="flex-1 min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent p-0 px-2 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
+                className="flex-1 min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent p-0 px-2 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
                 rows={1}
                 disabled={isStreaming}
               />
@@ -1498,7 +1503,7 @@ export function ChatView() {
                   className={cn(
                     'size-8 rounded-xl shrink-0 transition-all duration-200',
                     input.trim() || imagePreview
-                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20'
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20 hover:scale-105'
                       : 'bg-muted/80 text-muted-foreground'
                   )}
                   onClick={handleSend}
