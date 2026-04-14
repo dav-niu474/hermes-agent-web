@@ -495,12 +495,6 @@ function ChatHistorySection({
                   {loadingSession && isActive && (
                     <Loader2 className="size-3 animate-spin shrink-0 text-muted-foreground" />
                   )}
-                  {!loadingSession && (
-                    <MessageSquare className={cn(
-                      'size-3 shrink-0',
-                      isActive ? 'text-primary/70' : 'text-muted-foreground/40'
-                    )} />
-                  )}
                   <span className="flex-1 min-w-0 text-[11px] font-medium truncate leading-tight">
                     {session.title}
                   </span>
