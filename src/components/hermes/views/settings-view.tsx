@@ -742,24 +742,22 @@ export function SettingsView() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Execution Backend</Label>
-                        <Select value={terminalSettings.backend} onValueChange={(v) => setTerminalSettings({ ...terminalSettings, backend: v })}>
+                        <Label className="flex items-center gap-2">
+                          Execution Backend
+                          <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800">Only Local available</Badge>
+                        </Label>
+                        <Select disabled value="local">
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="local">Local (subprocess)</SelectItem>
-                            <SelectItem value="docker">Docker container</SelectItem>
-                            <SelectItem value="ssh">SSH (Remote)</SelectItem>
-                            <SelectItem value="modal">Modal (Serverless)</SelectItem>
-                            <SelectItem value="daytona">Daytona</SelectItem>
+                            <SelectItem value="docker" disabled>Docker container (coming soon)</SelectItem>
+                            <SelectItem value="ssh" disabled>SSH (Remote) (coming soon)</SelectItem>
+                            <SelectItem value="modal" disabled>Modal (Serverless) (coming soon)</SelectItem>
+                            <SelectItem value="daytona" disabled>Daytona (coming soon)</SelectItem>
                           </SelectContent>
                         </Select>
                         <p className="text-[11px] text-muted-foreground">
-                          <span className="font-medium text-foreground">Current:</span> {terminalSettings.backend} — {' '}
-                          {terminalSettings.backend === 'local' && 'Commands run directly on the host machine'}
-                          {terminalSettings.backend === 'docker' && 'Commands run inside an isolated Docker container'}
-                          {terminalSettings.backend === 'ssh' && 'Commands run on a remote SSH host'}
-                          {terminalSettings.backend === 'modal' && 'Commands run in Modal serverless functions'}
-                          {terminalSettings.backend === 'daytona' && 'Commands run in Daytona dev environments'}
+                          <span className="font-medium text-foreground">Current:</span> local — Commands run directly on the host machine.
                         </p>
                       </div>
 
@@ -928,8 +926,9 @@ export function SettingsView() {
                     <CardHeader className="pb-3">
                       <CardTitle className="text-base flex items-center gap-2">
                         <Zap className="size-4" /> Context Compression
+                        <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800">Not Yet Implemented</Badge>
                       </CardTitle>
-                      <CardDescription>Control how old messages are compressed to save context window space</CardDescription>
+                      <CardDescription>Control how old messages are compressed to save context window space. <span className="text-amber-600">This feature is planned but not yet implemented.</span></CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="flex items-center justify-between">
@@ -995,7 +994,9 @@ export function SettingsView() {
                     <CardContent className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <Label>Compact Mode</Label>
+                          <Label className="flex items-center gap-2">Compact Mode
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground">Planned</Badge>
+                          </Label>
                           <p className="text-xs text-muted-foreground">Use more compact message display</p>
                         </div>
                         <Switch

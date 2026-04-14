@@ -507,7 +507,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </Avatar>
       <div className={cn('flex-1 min-w-0 flex flex-col', isUser ? 'items-end' : 'items-start')}>
         {/* Thinking / Reasoning Block */}
-        {!isUser && hasReasoning && (
+        {!isUser && hasReasoning && showReasoning !== false && (
           <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} reasoningComplete={message.reasoningComplete} />
         )}
 
@@ -569,7 +569,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
 
         {/* Streaming indicator when only reasoning */}
-        {!isUser && !message.content && message.isStreaming && hasReasoning && !hasToolCalls && !message.reasoningComplete && (
+        {!isUser && !message.content && message.isStreaming && hasReasoning && !hasToolCalls && !message.reasoningComplete && showReasoning !== false && (
           <div className="flex items-center gap-1.5 py-0.5">
             <Loader2 className="size-3 animate-spin text-violet-400/50" />
             <span className="text-[10px] text-muted-foreground/50">Thinking...</span>
@@ -970,6 +970,7 @@ export function ChatView() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [showReasoning, setShowReasoning] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1006,6 +1007,17 @@ export function ChatView() {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
+
+  // ── Load display config (show_reasoning) ──
+  useEffect(() => {
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(cfg => {
+        const display = cfg.display as Record<string, unknown> | undefined;
+        setShowReasoning(display?.show_reasoning !== false); // default: true
+      })
+      .catch(() => { /* non-critical */ });
+  }, []);
 
   // ── Auto-scroll to bottom ──
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {

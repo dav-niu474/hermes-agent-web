@@ -46,6 +46,8 @@ export interface AgentConfig {
   sessionId?: string;
   /** Skills system prompt block to inject */
   skillsPrompt?: string;
+  /** Personality flavor from display config (kawaii, concise, etc.) */
+  personality?: string;
 }
 
 export interface ToolCall {
@@ -585,6 +587,7 @@ export class AgentLoop {
       availableToolNames: this.validToolNames,
       model: this.config.model,
       soulMd: this.config.systemPrompt,
+      personality: this.config.personality,
       sessionId: this.config.sessionId,
       provider: this.config.provider,
       skillsPrompt: this.config.skillsPrompt,

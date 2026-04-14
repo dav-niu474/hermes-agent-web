@@ -10,6 +10,7 @@ import {
   type MemoryManagerInterface,
   getLLMConfig,
   resolveToolset,
+  loadConfig,
   MemoryManager,
   ALL_TOOLS,
   getToolsetFilter,
@@ -880,7 +881,8 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     const execAsync = promisify(execCmd);
     const pathMod = await import("path");
 
-    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || 60)) * 1000;
+    const configTimeout = (loadConfig().terminal?.timeout as number) || 180;
+    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || configTimeout)) * 1000;
     const workdir = process.env.HERMES_WORKSPACE || process.cwd();
 
     try {
@@ -1226,9 +1228,21 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Build components ──
+    const config = loadConfig();
     const toolRegistry = new ToolRegistryAdapter(toolNames);
-    const memoryManager = new MemoryManager();
-    const memoryAdapter = new MemoryManagerAdapter(memoryManager, toolRegistry);
+
+    // Memory: read config for char limits and enabled state
+    const memCfg = config.memory ?? {};
+    const memEnabled = memCfg.memory_enabled !== false;
+    const memoryManager = memEnabled
+      ? new MemoryManager(
+          (memCfg.memory_char_limit as number) ?? 2200,
+          (memCfg.user_char_limit as number) ?? 1375,
+        )
+      : null;
+    const memoryAdapter = memoryManager
+      ? new MemoryManagerAdapter(memoryManager, toolRegistry)
+      : null;
 
     // ── Load skills system prompt ──
     let skillsPrompt = "";
@@ -1239,15 +1253,17 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Agent config ──
+    const personality = (config.display as Record<string, unknown>)?.personality as string | undefined;
     const agentConfig: AgentConfig = {
       model: llmConfig.model,
       provider: llmConfig.provider,
       apiKey: llmConfig.apiKey,
       baseUrl: llmConfig.baseUrl,
       platform: "web",
-      maxIterations: 90,
+      maxIterations: (config.agent?.max_turns as number) ?? 90,
       sessionId: localSessionId,
       skillsPrompt,
+      personality,
     };
 
     const agentLoop = new AgentLoop(agentConfig, toolRegistry, memoryAdapter);

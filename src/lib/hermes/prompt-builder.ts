@@ -228,6 +228,8 @@ export interface BuildSystemPromptOptions {
   ephemeralPrompt?: string;
   /** SOUL.md content (overrides DEFAULT_AGENT_IDENTITY when present) */
   soulMd?: string;
+  /** Personality flavor from config (display.personality) */
+  personality?: string;
   /** Session ID for the timestamp line */
   sessionId?: string;
   /** Provider name for the timestamp line */
@@ -275,6 +277,21 @@ export async function buildSystemPrompt(
     parts.push(soulMd);
   } else {
     parts.push(DEFAULT_AGENT_IDENTITY);
+  }
+
+  // ── Layer 1.5: Personality flavor (from config display.personality) ───
+  if (personality && personality !== "helpful") {
+    const flavorMap: Record<string, string> = {
+      kawaii: "Tone & style: Be warm, friendly, and approachable. Use occasional light expressions. Make the conversation feel pleasant and engaging, but stay professional and helpful.",
+      concise: "Tone & style: Be extremely concise and direct. Minimize preamble and pleasantries. Get straight to the point. Prefer short responses over long explanations.",
+      creative: "Tone & style: Be creative, exploratory, and imaginative. Offer novel perspectives and think outside the box. Suggest unconventional approaches when relevant.",
+      technical: "Tone & style: Be a deep technical expert. Provide precise, accurate, and detailed technical explanations. Use correct terminology. Show work and reasoning for technical decisions.",
+      formal: "Tone & style: Be formal and professional. Use polished language, proper grammar, and a respectful tone. Avoid slang, casual expressions, and humor.",
+    };
+    const flavor = flavorMap[personality];
+    if (flavor) {
+      parts.push(flavor);
+    }
   }
 
   // ── Layer 2: Tool-aware behavioral guidance ──────────────────────────
