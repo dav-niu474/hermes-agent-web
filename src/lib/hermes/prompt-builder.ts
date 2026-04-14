@@ -265,6 +265,7 @@ export async function buildSystemPrompt(
     model,
     ephemeralPrompt,
     soulMd,
+    personality,
     sessionId,
     provider,
     systemMessage,
