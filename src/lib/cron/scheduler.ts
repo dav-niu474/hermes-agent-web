@@ -8,7 +8,19 @@
  * All functions are async and server-side only.
  */
 
-import { db } from "../db";
+/**
+ * Lazy-loaded Prisma client.
+ *
+ * Using a getter function instead of a top-level import so that the module
+ * can be loaded without triggering Prisma initialization (which validates
+ * env vars). This is critical for instrumentation.ts which loads the
+ * scheduler at server startup — if the DB env var is missing we want a
+ * graceful warning, not a process crash.
+ */
+async function getDb() {
+  const { db } = await import("../db");
+  return db;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -207,6 +219,7 @@ const CRON_GRACE_WINDOW_MS = 2 * 60 * 60 * 1000;
  */
 export async function getDueJobs(): Promise<CronJobRow[]> {
   const now = new Date();
+  const db = await getDb();
 
   const jobs = await db.cronJob.findMany({
     where: {
@@ -309,7 +322,7 @@ export async function executeJob(job: CronJobRow): Promise<{
 
   // 1. Mark as running
   try {
-    await db.cronJob.update({ where: { id: job.id }, data: jobUpdate });
+    await (await getDb()).cronJob.update({ where: { id: job.id }, data: jobUpdate });
   } catch (err) {
     console.error(`[CronScheduler] Failed to mark job ${job.id} as running:`, err);
   }
@@ -367,7 +380,7 @@ export async function executeJob(job: CronJobRow): Promise<{
 
   // 5. Save CronJobLog
   try {
-    await db.cronJobLog.create({
+    await (await getDb()).cronJobLog.create({
       data: {
         jobId: job.id,
         status: success ? "success" : "error",
@@ -408,7 +421,7 @@ export async function executeJob(job: CronJobRow): Promise<{
   }
 
   try {
-    await db.cronJob.update({ where: { id: job.id }, data: updateData });
+    await (await getDb()).cronJob.update({ where: { id: job.id }, data: updateData });
   } catch (err) {
     console.error(`[CronScheduler] Failed to update job ${job.id}:`, err);
   }
@@ -464,7 +477,7 @@ export async function tick(): Promise<TickResult> {
           ? computeNextRun(schedule, new Date())
           : null;
 
-        await db.cronJob
+        await (await getDb()).cronJob
           .update({
             where: { id: job.id },
             data: {
@@ -542,6 +555,7 @@ export async function triggerJob(
   const now = new Date();
 
   try {
+    const db = await getDb();
     const job = await db.cronJob.update({
       where: { id: jobId },
       data: {
@@ -882,6 +896,7 @@ export interface SchedulerStats {
  */
 export async function getSchedulerStats(): Promise<SchedulerStats> {
   const now = new Date();
+  const db = await getDb();
   const [totalJobs, enabledJobs, dueJobs] = await Promise.all([
     db.cronJob.count(),
     db.cronJob.count({ where: { isEnabled: true } }),

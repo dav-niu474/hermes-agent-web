@@ -1532,3 +1532,33 @@ All 5 endpoints tested and verified:
 - Uses Bun's native `Bun.serve()` with standard `Request → Response` fetch API (not Node.js http)
 - All DB errors are caught gracefully — service continues running even without database
 - Scheduler imports `../db` (relative path) for compatibility with both Next.js and standalone Bun
+
+---
+Task ID: cron-scheduler-fix
+Agent: Main
+Task: Fix and verify cron scheduler engine — make "Run Now" work, add background tick, resilient DB loading
+
+Work Log:
+- Analyzed the cron scheduler system: scheduler.ts (1019 lines), API routes (CRUD + trigger + logs), frontend (cronjobs-view.tsx)
+- Found critical issues:
+  1. No background tick process — tick() function existed but nothing called it periodically
+  2. "Run Now" was a no-op — /api/cronjobs/[id]/trigger only set nextRunAt=now, didn't execute
+  3. Route conflict — two trigger route files ([id]/route.ts POST and [id]/trigger/route.ts POST)
+  4. Top-level db import in scheduler.ts crashed server when DB env var missing (Prisma validates on import)
+- Fixed all issues:
+  1. Created src/instrumentation.ts with setInterval background scheduler (60s tick cycle)
+  2. Deleted duplicate [id]/trigger/route.ts, rewrote [id]/route.ts POST to call executeJob() immediately
+  3. Created /api/cronjobs/tick endpoint (GET for stats, POST for manual trigger) for Vercel Cron Jobs
+  4. Changed scheduler.ts to use lazy-loaded getDb() function instead of top-level import
+  5. Changed cron-client.ts similarly for resilience
+- Verified: dev server starts, homepage returns 200, scheduler gracefully handles missing DB env var
+- ESLint: zero new errors (all 5 pre-existing in hermes-agent/)
+
+Stage Summary:
+- Files created: src/instrumentation.ts, src/app/api/cronjobs/tick/route.ts
+- Files modified: src/lib/cron/scheduler.ts, src/lib/cron-client.ts, src/app/api/cronjobs/[id]/route.ts
+- Files deleted: src/app/api/cronjobs/[id]/trigger/route.ts (duplicate)
+- "Run Now" now executes job immediately (fire-and-forget background execution)
+- Background scheduler ticks every 60s, with graceful DB failure handling
+- Manual tick endpoint at POST /api/cronjobs/tick for Vercel Cron Jobs integration
+- Scheduler is resilient: missing DB env var = warning log, no server crash

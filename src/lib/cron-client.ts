@@ -6,7 +6,10 @@
  * and the chat route's ToolRegistryAdapter.
  */
 
-import { db } from '@/lib/db';
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 
 interface CreateCronJobParams {
   name: string;
@@ -28,6 +31,7 @@ interface CronJobInfo {
  */
 export async function listCronJobs(): Promise<CronJobInfo[]> {
   try {
+    const db = await getDb();
     const jobs = await db.cronJob.findMany({
       orderBy: { createdAt: 'desc' },
     });
@@ -52,6 +56,7 @@ export async function createCronJob(
 ): Promise<CronJobInfo> {
   const { name, schedule, task } = params;
 
+  const db = await getDb();
   const job = await db.cronJob.create({
     data: {
       name,
@@ -75,6 +80,7 @@ export async function createCronJob(
  * Get a single cron job by ID.
  */
 export async function getCronJob(jobId: string): Promise<CronJobInfo | null> {
+  const db = await getDb();
   const job = await db.cronJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
 
@@ -92,5 +98,5 @@ export async function getCronJob(jobId: string): Promise<CronJobInfo | null> {
  * Delete a cron job by ID.
  */
 export async function deleteCronJob(jobId: string): Promise<void> {
-  await db.cronJob.delete({ where: { id: jobId } });
+  await (await getDb()).cronJob.delete({ where: { id: jobId } });
 }
