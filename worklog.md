@@ -1456,3 +1456,79 @@ Stage Summary:
 - User messages have simple solid primary color bubble
 - All excessive animations, glows, gradients, shadows removed
 - UI is now clean, minimal, and professional
+
+---
+
+## Task: Create Cron Scheduler Mini-Service
+
+**Status**: ✅ Completed
+**Date**: 2026-04-14
+
+### Summary
+Created a mini-service at `mini-services/cron-scheduler/` that runs the cron scheduler in the background. The service provides HTTP endpoints for health monitoring, manual tick triggering, and job-specific triggering, with a 60-second background interval that executes due cron jobs.
+
+### Files Created
+
+#### 1. `mini-services/cron-scheduler/package.json`
+Basic Bun project configuration with `bun --hot index.ts` dev script.
+
+#### 2. `mini-services/cron-scheduler/tsconfig.json`
+Standard Bun TypeScript configuration targeting ESNext with bundler module resolution.
+
+#### 3. `mini-services/cron-scheduler/index.ts` (~280 lines)
+Main entry point running on port 3031 using Bun's native HTTP server. Features:
+- **Background interval**: `setInterval` every 60 seconds calls `performTick()`
+- **Initial tick**: 5-second warm-up delay before first tick
+- **In-memory lock**: Prevents concurrent tick execution
+- **State tracking**: Uptime, lastTick, jobsExecuted, nextTickIn
+
+**HTTP Endpoints:**
+- `GET /health` → `{ status, uptime, lastTick, jobsExecuted, nextTickIn, stats: { totalJobs, enabledJobs, dueJobs } }`
+- `POST /tick` → Manually trigger a tick, returns `{ executed, errors, skipped, jobs[] }`
+- `POST /trigger/:jobId` → Trigger a specific job by setting its nextRunAt to now
+- All other routes → 404 with available endpoints list
+
+**Error Handling:**
+- Never crashes on single job failure — wraps all DB operations in try/catch
+- Health endpoint returns 503 with error details when DB is unavailable
+- `unhandledRejection` and `uncaughtException` handlers log but never crash
+- Graceful shutdown on SIGINT/SIGTERM/SIGHUP — clears interval and stops server
+
+### Files Modified
+
+#### 1. `src/lib/cron/scheduler.ts`
+The scheduler library already existed (~1010 lines, created by a previous agent). Made two targeted changes:
+- Changed `import { db } from "@/lib/db"` to `import { db } from "../db"` — relative import so the mini-service can import it directly via `../../src/lib/cron/scheduler` (Bun supports TS imports from relative paths, but doesn't understand Next.js `@/` aliases)
+- Added `getSchedulerStats()` export function — returns `{ totalJobs, enabledJobs, dueJobs }` for the health endpoint
+- Added `TICK_INTERVAL_MS` export constant (60,000ms)
+- Added `SchedulerStats` export interface
+
+### Architecture
+```
+mini-services/cron-scheduler/index.ts (port 3031)
+  └── imports ../../src/lib/cron/scheduler.ts
+        ├── tick()           — Find due jobs, execute them
+        ├── triggerJob(id)   — Set job's nextRunAt to now
+        ├── getSchedulerStats() — Count total/enabled/due jobs
+        ├── executeJob(job)  — Call /api/chat with cron system hint
+        ├── getDueJobs()     — Find jobs past their nextRunAt
+        ├── computeNextRun() — Calculate next occurrence (cron/interval/once)
+        └── parseSchedule()  — Parse human-readable schedule strings
+```
+
+### Testing
+All 5 endpoints tested and verified:
+| Endpoint | Method | Result |
+|----------|--------|--------|
+| `/health` | GET | ✅ Returns uptime, stats (503 when DB unavailable) |
+| `/tick` | POST | ✅ Triggers scheduler tick, returns execution count |
+| `/trigger/:jobId` | POST | ✅ Marks job for next tick (404 when DB unavailable) |
+| `/unknown` | GET | ✅ 404 with available endpoints |
+| `/health` | POST | ✅ 405 Method not allowed |
+
+### Technical Notes
+- ESLint: Zero new errors in `src/` and `mini-services/` (5 pre-existing errors in `hermes-agent/`)
+- Dev server compiles successfully
+- Uses Bun's native `Bun.serve()` with standard `Request → Response` fetch API (not Node.js http)
+- All DB errors are caught gracefully — service continues running even without database
+- Scheduler imports `../db` (relative path) for compatibility with both Next.js and standalone Bun
