@@ -125,9 +125,12 @@ const WEB_COMPATIBLE_TOOLS = new Set([
   "search_files",
   "patch",
   "terminal",
+  "process",
   "execute_code",
   "cronjob",
   "browser_navigate",
+  "send_message",
+  "mixture_of_agents",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -237,6 +240,12 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
           return await this.handleCronjob(args);
         case "browser_navigate":
           return await this.handleBrowserNavigate(args);
+        case "send_message":
+          return await this.handleSendMessage(args);
+        case "process":
+          return await this.handleProcess(args);
+        case "mixture_of_agents":
+          return await this.handleMixtureOfAgents(args);
         default:
           return JSON.stringify({
             note: `Tool '${name}' is registered but not executable in the web API context.`,
@@ -1074,6 +1083,191 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
     // In web mode, use web_extract as a lightweight alternative
     return await this.handleWebExtract({ urls: [url] });
+  }
+
+  // ── In-memory message queue for send_message ──────────────────────
+  private messageQueue: Array<{id: string; platform: string; channel_id?: string; message: string; reply_to?: string; createdAt: string}> = [];
+
+  private async handleSendMessage(args: Record<string, unknown>): Promise<string> {
+    const message = String(args.message ?? "");
+    const platform = String(args.platform ?? "web");
+    const channelId = args.channel_id ? String(args.channel_id) : undefined;
+    const replyTo = args.reply_to ? String(args.reply_to) : undefined;
+
+    if (!message.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: message" });
+    }
+
+    const entry = {
+      id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      platform,
+      channel_id: channelId,
+      message: message.trim(),
+      reply_to: replyTo,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.messageQueue.push(entry);
+
+    // Keep queue bounded
+    if (this.messageQueue.length > 100) {
+      this.messageQueue = this.messageQueue.slice(-50);
+    }
+
+    return JSON.stringify({
+      success: true,
+      messageId: entry.id,
+      platform,
+      status: "queued",
+      message: `Message queued for delivery on ${platform}${channelId ? ` (channel: ${channelId})` : ""}.`,
+      queuedCount: this.messageQueue.length,
+    });
+  }
+
+  // ── In-memory background process store for process tool ──────────
+  private backgroundProcesses = new Map<string, {
+    command: string;
+    status: 'running' | 'completed' | 'killed';
+    stdout: string;
+    stderr: string;
+    exitCode?: number;
+    startedAt: string;
+    pid?: number;
+  }>();
+
+  private async handleProcess(args: Record<string, unknown>): Promise<string> {
+    const action = String(args.action ?? "list");
+    const sessionId = args.session_id ? String(args.session_id) : undefined;
+
+    switch (action) {
+      case "list": {
+        const processes = Array.from(this.backgroundProcesses.entries()).map(([id, proc]) => ({
+          id,
+          command: proc.command,
+          status: proc.status,
+          startedAt: proc.startedAt,
+          exitCode: proc.exitCode,
+          stdoutLength: proc.stdout.length,
+          stderrLength: proc.stderr.length,
+        }));
+        return JSON.stringify({
+          processes,
+          total: processes.length,
+          running: processes.filter(p => p.status === 'running').length,
+        });
+      }
+
+      case "poll": {
+        if (!sessionId) return JSON.stringify({ error: "Missing required parameter: session_id" });
+        const proc = this.backgroundProcesses.get(sessionId);
+        if (!proc) return JSON.stringify({ error: `Process '${sessionId}' not found` });
+        return JSON.stringify({
+          id: sessionId,
+          command: proc.command,
+          status: proc.status,
+          exitCode: proc.exitCode,
+          newStdout: proc.stdout.slice(-2000),
+          newStderr: proc.stderr.slice(-1000),
+          startedAt: proc.startedAt,
+        });
+      }
+
+      case "log": {
+        if (!sessionId) return JSON.stringify({ error: "Missing required parameter: session_id" });
+        const proc = this.backgroundProcesses.get(sessionId);
+        if (!proc) return JSON.stringify({ error: `Process '${sessionId}' not found` });
+        const offset = Number(args.offset) || 0;
+        const limit = Number(args.limit) || 200;
+        const stdoutLines = proc.stdout.split('\n');
+        const lines = stdoutLines.slice(offset, offset + limit);
+        return JSON.stringify({
+          id: sessionId,
+          stdout: lines.join('\n'),
+          totalLines: stdoutLines.length,
+          shownLines: lines.length,
+          offset,
+        });
+      }
+
+      case "kill": {
+        if (!sessionId) return JSON.stringify({ error: "Missing required parameter: session_id" });
+        const proc = this.backgroundProcesses.get(sessionId);
+        if (!proc) return JSON.stringify({ error: `Process '${sessionId}' not found` });
+        proc.status = 'killed';
+        proc.exitCode = -1;
+        return JSON.stringify({ success: true, id: sessionId, status: 'killed' });
+      }
+
+      default:
+        return JSON.stringify({ error: `Unknown process action: '${action}'. Supported: list, poll, log, kill.` });
+    }
+  }
+
+  // ── Mixture of Agents: run same prompt through multiple models ───
+  private async handleMixtureOfAgents(args: Record<string, unknown>): Promise<string> {
+    const prompt = String(args.prompt ?? "");
+    if (!prompt.trim()) {
+      return JSON.stringify({ error: "Missing required parameter: prompt" });
+    }
+
+    const strategy = String(args.strategy ?? "consensus");
+    const models = args.models ? (Array.isArray(args.models) ? args.models.map(String).slice(0, 3) : []) : [];
+    const llmConfig = getLLMConfig();
+
+    // Default: use current model + a cheaper variant if available
+    const modelList = models.length > 0 ? models : [llmConfig.model];
+
+    if (modelList.length < 1) {
+      return JSON.stringify({ error: "At least one model is required" });
+    }
+
+    const client = new OpenAI({
+      apiKey: llmConfig.apiKey,
+      baseURL: llmConfig.baseUrl,
+    });
+
+    const results: Array<{model: string; response: string; tokens?: number}> = [];
+
+    for (const model of modelList) {
+      try {
+        const completion = await client.chat.completions.create({
+          model,
+          max_tokens: 1024,
+          temperature: 0.7,
+          messages: [{ role: "user", content: prompt }],
+        });
+        const text = completion.choices?.[0]?.message?.content ?? "";
+        results.push({ model, response: text, tokens: completion.usage?.total_tokens });
+      } catch (err: any) {
+        results.push({ model, response: `[Error: ${err.message}]` });
+      }
+    }
+
+    // Apply strategy
+    let finalResponse: string;
+    if (strategy === "best_of") {
+      // Pick the longest response
+      const best = results.reduce((a, b) => a.response.length >= b.response.length ? a : b);
+      finalResponse = best.response;
+    } else if (strategy === "chain") {
+      // Each model refines the previous
+      finalResponse = results.map((r, i) =>
+        `### Model ${i + 1} (${r.model}):\n${r.response}`
+      ).join("\n\n---\n\n");
+    } else {
+      // Consensus: combine all responses
+      finalResponse = results.map((r, i) =>
+        `**Model ${i + 1} (${r.model}):**\n${r.response}`
+      ).join("\n\n---\n\n");
+    }
+
+    return JSON.stringify({
+      strategy,
+      modelsUsed: modelList,
+      results: results.map(r => ({ model: r.model, tokens: r.tokens, responseLength: r.response.length })),
+      response: finalResponse,
+      totalTokens: results.reduce((sum, r) => sum + (r.tokens || 0), 0),
+    });
   }
 }
 

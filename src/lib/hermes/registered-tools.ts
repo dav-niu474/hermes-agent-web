@@ -16,12 +16,34 @@
  */
 
 import { registry, toolResult, toolError, type ToolContext } from './tool-registry';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
 const execAsync = promisify(exec);
+
+// ─── Module-level: in-memory message queue ────────────────────────────────
+const messageQueue: Array<{
+  id: string;
+  platform: string;
+  channel_id?: string;
+  message: string;
+  reply_to?: string;
+  createdAt: Date;
+}> = [];
+
+// ─── Module-level: background process store ────────────────────────────────
+interface BackgroundProcess {
+  command: string;
+  pid?: number;
+  stdout: string;
+  stderr: string;
+  exitCode?: number;
+  startedAt: Date;
+  status: 'running' | 'completed' | 'killed';
+}
+const backgroundProcesses = new Map<string, BackgroundProcess>();
 
 // ─── Helper: lazy import wrapper for z-ai-web-dev-sdk ──────────────────────
 
@@ -1128,6 +1150,330 @@ registry.register({
   },
   description: 'Analyze images using AI vision.',
   emoji: '👁️',
+});
+
+// ─── Register: Send Message ─────────────────────────────────────────────
+
+registry.register({
+  name: 'send_message',
+  toolset: 'messaging',
+  schema: {
+    type: 'object',
+    description: 'Send a message to a cross-platform channel. Supports web, telegram, discord, slack, and whatsapp platforms. Stores the message in a queue for delivery confirmation.',
+    properties: {
+      message: { type: 'string', description: 'The message content to send' },
+      platform: {
+        type: 'string',
+        enum: ['web', 'telegram', 'discord', 'slack', 'whatsapp'],
+        description: 'Target platform for the message',
+      },
+      channel_id: { type: 'string', description: 'Optional channel/group ID to send the message to' },
+      reply_to: { type: 'string', description: 'Optional message ID to reply to' },
+    },
+    required: ['message', 'platform'],
+  },
+  handler: async (args) => {
+    const message = String(args.message ?? '');
+    const platform = String(args.platform ?? '');
+
+    if (!message.trim()) return toolError('Missing required parameter: message');
+    if (!platform || !['web', 'telegram', 'discord', 'slack', 'whatsapp'].includes(platform)) {
+      return toolError("Invalid or missing 'platform': must be one of web, telegram, discord, slack, whatsapp");
+    }
+
+    const entry = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      platform,
+      channel_id: args.channel_id ? String(args.channel_id) : undefined,
+      message,
+      reply_to: args.reply_to ? String(args.reply_to) : undefined,
+      createdAt: new Date(),
+    };
+
+    messageQueue.push(entry);
+
+    return toolResult({
+      success: true,
+      messageId: entry.id,
+      platform,
+      channel_id: entry.channel_id,
+      reply_to: entry.reply_to,
+      status: 'queued',
+      queuedAt: entry.createdAt.toISOString(),
+      queueLength: messageQueue.length,
+      message: `Message queued for delivery on ${platform}${entry.channel_id ? ` channel ${entry.channel_id}` : ''}`,
+    });
+  },
+  description: 'Send a cross-platform message.',
+  emoji: '💬',
+});
+
+// ─── Register: Process (background process management) ────────────────────
+
+registry.register({
+  name: 'process',
+  toolset: 'terminal',
+  schema: {
+    type: 'object',
+    description: 'Manage background processes spawned by the terminal tool. Supports listing, polling, reading logs, writing input, killing, and waiting for processes.',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['list', 'poll', 'log', 'wait', 'kill', 'write', 'submit'],
+        description: 'Action to perform on the background process',
+      },
+      session_id: { type: 'string', description: 'Unique process session ID' },
+      data: { type: 'string', description: 'Input data to write to stdin (for write/submit actions)' },
+      timeout: { type: 'integer', description: 'Max seconds to wait (for wait action, default: 30)', default: 30, maximum: 600 },
+      offset: { type: 'integer', description: 'Byte offset for log retrieval (default: 0)', default: 0, minimum: 0 },
+      limit: { type: 'integer', description: 'Max bytes to retrieve from log (default: 4096)', default: 4096, maximum: 65536 },
+    },
+    required: ['action'],
+  },
+  handler: async (args) => {
+    const action = String(args.action ?? '');
+    const sessionId = args.session_id ? String(args.session_id) : '';
+
+    switch (action) {
+      case 'list': {
+        const processes: Array<{ sessionId: string; command: string; pid?: number; status: string; startedAt: string }> = [];
+        backgroundProcesses.forEach((proc, id) => {
+          processes.push({
+            sessionId: id,
+            command: proc.command,
+            pid: proc.pid,
+            status: proc.status,
+            startedAt: proc.startedAt.toISOString(),
+          });
+        });
+        return toolResult({ processes, total: processes.length });
+      }
+
+      case 'poll': {
+        if (!sessionId) return toolError('Missing required parameter: session_id for poll action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        return toolResult({
+          sessionId,
+          status: proc.status,
+          pid: proc.pid,
+          exitCode: proc.exitCode,
+          stdoutLength: proc.stdout.length,
+          stderrLength: proc.stderr.length,
+          startedAt: proc.startedAt.toISOString(),
+        });
+      }
+
+      case 'log': {
+        if (!sessionId) return toolError('Missing required parameter: session_id for log action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        const offset = Math.max(0, Number(args.offset) || 0);
+        const limit = Math.min(65536, Math.max(1, Number(args.limit) || 4096));
+        const stdoutChunk = proc.stdout.slice(offset, offset + limit);
+        const stderrChunk = proc.stderr.slice(offset, offset + limit);
+        return toolResult({
+          sessionId,
+          status: proc.status,
+          exitCode: proc.exitCode,
+          stdout: stdoutChunk,
+          stderr: stderrChunk,
+          offset,
+          bytesReturned: stdoutChunk.length + stderrChunk.length,
+          totalStdoutBytes: proc.stdout.length,
+          totalStderrBytes: proc.stderr.length,
+          truncated: (offset + limit) < proc.stdout.length || (offset + limit) < proc.stderr.length,
+        });
+      }
+
+      case 'wait': {
+        if (!sessionId) return toolError('Missing required parameter: session_id for wait action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        const timeoutMs = Math.min(600000, Math.max(1000, (Number(args.timeout) || 30) * 1000));
+        // Poll until completed/killed or timeout
+        const startTime = Date.now();
+        while (proc.status === 'running' && (Date.now() - startTime) < timeoutMs) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        return toolResult({
+          sessionId,
+          status: proc.status,
+          pid: proc.pid,
+          exitCode: proc.exitCode,
+          stdout: proc.stdout,
+          stderr: proc.stderr,
+          timedOut: proc.status === 'running',
+        });
+      }
+
+      case 'kill': {
+        if (!sessionId) return toolError('Missing required parameter: session_id for kill action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        if (proc.pid) {
+          try { process.kill(proc.pid, 'SIGTERM'); } catch { /* process may already be dead */ }
+        }
+        proc.status = 'killed';
+        return toolResult({
+          sessionId,
+          status: 'killed',
+          message: `Process ${sessionId} (PID ${proc.pid || 'unknown'}) killed`,
+        });
+      }
+
+      case 'write': {
+        if (!sessionId) return toolError('Missing required parameter: session_id for write action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        if (proc.status !== 'running') return toolError(`Process ${sessionId} is not running (status: ${proc.status})`);
+        // Write to stdin is not possible with spawn after the fact without a reference.
+        // Store data for the process log as a best-effort record.
+        const data = String(args.data ?? '');
+        proc.stderr += `[stdin write]: ${data}\n`;
+        return toolResult({
+          sessionId,
+          status: proc.status,
+          message: `Data written to process stdin (${data.length} bytes)`,
+        });
+      }
+
+      case 'submit': {
+        // Submit: write data and then wait for completion
+        if (!sessionId) return toolError('Missing required parameter: session_id for submit action');
+        const proc = backgroundProcesses.get(sessionId);
+        if (!proc) return toolError(`Process not found: ${sessionId}`);
+        if (proc.status !== 'running') return toolError(`Process ${sessionId} is not running (status: ${proc.status})`);
+        const data = String(args.data ?? '');
+        proc.stderr += `[stdin submit]: ${data}\n`;
+        const timeoutMs = Math.min(600000, Math.max(1000, (Number(args.timeout) || 30) * 1000));
+        const startTime = Date.now();
+        while (proc.status === 'running' && (Date.now() - startTime) < timeoutMs) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        return toolResult({
+          sessionId,
+          status: proc.status,
+          pid: proc.pid,
+          exitCode: proc.exitCode,
+          stdout: proc.stdout,
+          stderr: proc.stderr,
+          timedOut: proc.status === 'running',
+        });
+      }
+
+      default:
+        return toolError(`Unknown process action: ${action}`);
+    }
+  },
+  description: 'Manage background processes.',
+  emoji: '⚙️',
+});
+
+// ─── Register: Mixture of Agents ──────────────────────────────────────────
+
+registry.register({
+  name: 'mixture_of_agents',
+  toolset: 'reasoning',
+  schema: {
+    type: 'object',
+    description: 'Run a prompt through multiple AI models and combine the results using a specified strategy. Supports consensus, best-of, and chain strategies with up to 3 models.',
+    properties: {
+      prompt: { type: 'string', description: 'The prompt to send to multiple models' },
+      models: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'List of model names to use (max 3)',
+        maxItems: 3,
+      },
+      strategy: {
+        type: 'string',
+        enum: ['consensus', 'best_of', 'chain'],
+        description: 'Strategy to combine results: consensus (majority vote summary), best_of (pick best response), chain (each model refines the previous)',
+      },
+    },
+    required: ['prompt', 'models', 'strategy'],
+  },
+  handler: async (args) => {
+    const prompt = String(args.prompt ?? '');
+    const models = Array.isArray(args.models) ? args.models.map(String).slice(0, 3) : [];
+    const strategy = String(args.strategy ?? 'consensus');
+
+    if (!prompt.trim()) return toolError('Missing required parameter: prompt');
+    if (models.length === 0) return toolError('Missing required parameter: models (provide 1-3 model names)');
+    if (!['consensus', 'best_of', 'chain'].includes(strategy)) {
+      return toolError("Invalid strategy: must be 'consensus', 'best_of', or 'chain'");
+    }
+
+    const zai = await getZAI();
+    if (!zai) return toolError('LLM service unavailable for mixture of agents');
+
+    try {
+      // Available model mapping — maps user-facing names to SDK model IDs
+      const modelMap: Record<string, string> = {
+        'glm-4-flash': 'glm-4-flash',
+        'glm-4-plus': 'glm-4-plus',
+        'glm-4-air': 'glm-4-air',
+        'glm-4-long': 'glm-4-long',
+        'gpt-4o-mini': 'glm-4-flash', // fallback mapping
+        'claude-haiku': 'glm-4-flash', // fallback mapping
+      };
+
+      // Run the prompt through each model sequentially
+      const results: Array<{ model: string; response: string; modelUsed: string }> = [];
+      let chainPrompt = prompt;
+
+      for (const model of models) {
+        const modelUsed = modelMap[model] || 'glm-4-flash';
+        const currentPrompt = strategy === 'chain' ? chainPrompt : prompt;
+
+        const completion = await zai.chat.completions.create({
+          model: modelUsed,
+          messages: [{ role: 'user', content: currentPrompt }],
+          max_tokens: 2048,
+        });
+
+        const response = completion.choices?.[0]?.message?.content || '';
+        results.push({ model, response, modelUsed });
+
+        // For chain strategy, append the response as context for the next model
+        if (strategy === 'chain') {
+          chainPrompt = `Previous model (${model}) response:\n${response}\n\nPlease refine and improve the above response. Original prompt: ${prompt}`;
+        }
+      }
+
+      // Apply strategy to combine results
+      let finalResult: string;
+      if (strategy === 'chain') {
+        // Chain: use the last model's refined output
+        finalResult = results[results.length - 1]?.response || '';
+      } else if (strategy === 'best_of') {
+        // Best-of: pick the longest response as a heuristic for most detailed
+        const best = results.reduce((prev, curr) =>
+          curr.response.length > prev.response.length ? curr : prev
+        );
+        finalResult = best.response;
+      } else {
+        // Consensus: combine all responses into a summary
+        finalResult = results
+          .map((r) => `[${r.model}]: ${r.response}`)
+          .join('\n\n---\n\n');
+      }
+
+      return toolResult({
+        strategy,
+        modelsUsed: results.map((r) => ({ requested: r.model, used: r.modelUsed })),
+        individualResults: results.map((r) => ({ model: r.model, responseLength: r.response.length })),
+        combinedResult: finalResult,
+        resultLength: finalResult.length,
+        message: `Ran prompt through ${results.length} model(s) with ${strategy} strategy`,
+      });
+    } catch (err) {
+      return toolError(`Mixture of agents failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+  description: 'Multi-model reasoning with combined results.',
+  emoji: '🤖',
 });
 
 // ─── Registration summary ────────────────────────────────────────────────

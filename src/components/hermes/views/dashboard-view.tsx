@@ -25,6 +25,10 @@ import {
   CircleDot,
   Loader2,
   RefreshCw,
+  PieChart,
+  Bot,
+  Hammer,
+  DollarSign,
 } from 'lucide-react';
 import {
   Card,
@@ -70,6 +74,66 @@ interface ApiStats {
     updatedAt: string;
     createdAt: string;
   }[];
+}
+
+/* ═══════════════════════════════════════════
+   INSIGHTS TYPES (matches the API response)
+   ═══════════════════════════════════════════ */
+
+interface InsightsOverview {
+  totalSessions: number;
+  totalMessages: number;
+  totalToolCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  avgMessagesPerSession: number;
+  dateRangeStart: string;
+  dateRangeEnd: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolMessages: number;
+}
+
+interface ModelUsage {
+  model: string;
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  toolCalls: number;
+}
+
+interface ToolUsage {
+  tool: string;
+  count: number;
+  percentage: number;
+}
+
+interface ActivityData {
+  byDay: Array<{ day: string; count: number }>;
+  byHour: Array<{ hour: number; count: number }>;
+  busiestDay: string;
+  busiestHour: number;
+  activeDays: number;
+}
+
+interface TopSession {
+  id: string;
+  title: string | null;
+  messageCount: number;
+  model: string | null;
+  createdAt: string;
+}
+
+interface InsightsReport {
+  overview: InsightsOverview;
+  models: ModelUsage[];
+  tools: ToolUsage[];
+  activity: ActivityData;
+  topSessions: TopSession[];
+  generatedAt: string;
 }
 
 /* ═══════════════════════════════════════════
@@ -137,6 +201,24 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHour < 24) return `${diffHour} hour${diffHour > 1 ? 's' : ''} ago`;
   if (diffDay === 1) return 'Yesterday';
   return `${diffDay} days ago`;
+}
+
+/** Format number with K/M suffix */
+function formatNumber(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** Format date string 'YYYY-MM-DD' to short label */
+function toShortDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short' });
+}
+
+function toMonthDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /* ═══════════════════════════════════════════
@@ -427,13 +509,104 @@ function TokensUsedCard({ total, loading }: { total: number; loading: boolean })
   );
 }
 
+function ToolCallsCard({ total, loading }: { total: number; loading: boolean }) {
+  const displayTotal = useCountUp(total, 1200, !loading);
+
+  return (
+    <motion.div variants={itemVariants} whileHover={{ y: -2, transition: { duration: 0.2 } }}>
+      <Card className="h-full hover:shadow-xl hover:shadow-primary/[0.06] transition-all duration-300 border-border/50">
+        <CardContent className="p-5 flex items-start justify-between hover:bg-gradient-to-br from-transparent to-primary/[0.02] transition-colors duration-300 rounded-lg">
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-muted-foreground">Tool Calls</p>
+            <div className="flex items-baseline gap-2">
+              {loading ? (
+                <div className="h-8 w-12 bg-muted rounded animate-pulse" />
+              ) : (
+                <span className="text-3xl font-bold tracking-tight tabular-nums">{displayTotal}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Agent tool invocations</span>
+            </div>
+          </div>
+          <div className="p-3 rounded-xl bg-chart-5/15">
+            <Hammer className="w-5 h-5 text-chart-5" />
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 /* ═══════════════════════════════════════════
-   ACTIVITY CHART — Placeholder (no historical tracking)
+   ACTIVITY CHART — Real data driven
    ═══════════════════════════════════════════ */
 
-function ActivityChartCard() {
-  const barHeights = [65, 40, 80, 55, 90, 70, 45];
-  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function ActivityChartCard({ data, loading, days }: { data: ActivityData | null; loading: boolean; days: number }) {
+  // Show last 14 days for the chart
+  const chartDays = data?.byDay.slice(-14) ?? [];
+  const maxCount = Math.max(...chartDays.map(d => d.count), 1);
+  const chartWidth = Math.max(chartDays.length * 38, 280);
+  const svgWidth = chartWidth + 20;
+
+  if (loading) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-chart-1" />
+                  Message Activity
+                </CardTitle>
+                <CardDescription>Loading activity data...</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="h-[220px] flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  if (!data || chartDays.length === 0) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-chart-1" />
+                  Message Activity
+                </CardTitle>
+                <CardDescription>No activity data yet</CardDescription>
+              </div>
+              <Badge variant="outline" className="text-xs">
+                {days} days
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="h-[220px] flex flex-col items-center justify-center">
+              <div className="p-3 rounded-full bg-muted/50 mb-3">
+                <BarChart3 className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-medium text-muted-foreground">No activity recorded</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Start chatting to see daily activity here.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div variants={itemVariants}>
@@ -445,58 +618,428 @@ function ActivityChartCard() {
                 <BarChart3 className="w-4 h-4 text-chart-1" />
                 Message Activity
               </CardTitle>
-              <CardDescription>Messages sent over the last 7 days</CardDescription>
+              <CardDescription>
+                {data.activeDays} active days &middot; Peak: {toShortDay(data.busiestDay)} ({toMonthDay(data.busiestDay)})
+              </CardDescription>
             </div>
             <Badge variant="outline" className="text-xs">
-              Last 7 days
+              Last {chartDays.length} days
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="h-[220px] flex flex-col items-center justify-center">
-            <svg viewBox="0 0 280 160" className="w-full max-w-[280px] h-auto" preserveAspectRatio="xMidYMid meet">
+          <div className="h-[220px] flex items-end">
+            <svg
+              viewBox={`0 0 ${svgWidth} 180`}
+              className="w-full h-auto"
+              preserveAspectRatio="xMidYMid meet"
+            >
               <defs>
                 <linearGradient id="barGrad0" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity="0.7" />
+                  <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity="0.8" />
                   <stop offset="100%" stopColor="hsl(var(--chart-1))" stopOpacity="0.25" />
                 </linearGradient>
                 <linearGradient id="barGrad1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--chart-2))" stopOpacity="0.7" />
+                  <stop offset="0%" stopColor="hsl(var(--chart-2))" stopOpacity="0.8" />
                   <stop offset="100%" stopColor="hsl(var(--chart-2))" stopOpacity="0.25" />
                 </linearGradient>
               </defs>
               {/* Baseline */}
-              <line x1="10" y1="130" x2="270" y2="130" stroke="currentColor" strokeOpacity="0.1" strokeWidth="1" />
-              {barHeights.map((h, i) => (
-                <g key={i}>
-                  <motion.rect
-                    x={10 + i * 38}
-                    y={130}
-                    width={24}
-                    height={0}
-                    rx={4}
-                    fill={i % 2 === 0 ? 'url(#barGrad0)' : 'url(#barGrad1)'}
-                    initial={{ height: 0, y: 130 }}
-                    animate={{ height: h * 1.1, y: 130 - h * 1.1 }}
-                    transition={{ duration: 0.8, delay: 0.2 + i * 0.08, ease: 'easeOut' }}
-                  />
-                  <text
-                    x={22 + i * 38}
-                    y={148}
-                    textAnchor="middle"
-                    className="fill-muted-foreground/50"
-                    fontSize="9"
-                  >
-                    {dayLabels[i]}
-                  </text>
-                </g>
-              ))}
+              <line x1="10" y1="145" x2={svgWidth - 10} y2="145" stroke="currentColor" strokeOpacity="0.1" strokeWidth="1" />
+              {/* Y-axis labels */}
+              <text x="5" y="148" textAnchor="start" className="fill-muted-foreground/40" fontSize="8">0</text>
+              {maxCount > 0 && (
+                <text x="5" y="20" textAnchor="start" className="fill-muted-foreground/40" fontSize="8">{maxCount}</text>
+              )}
+              {chartDays.map((d, i) => {
+                const barHeight = maxCount > 0 ? Math.max((d.count / maxCount) * 120, d.count > 0 ? 4 : 0) : 0;
+                const x = 14 + i * 38;
+                return (
+                  <g key={d.day}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <motion.rect
+                          x={x}
+                          y={145}
+                          width={24}
+                          height={0}
+                          rx={4}
+                          fill={i % 2 === 0 ? 'url(#barGrad0)' : 'url(#barGrad1)'}
+                          initial={{ height: 0, y: 145 }}
+                          animate={{ height: barHeight, y: 145 - barHeight }}
+                          transition={{ duration: 0.6, delay: 0.1 + i * 0.04, ease: 'easeOut' }}
+                          className="cursor-pointer"
+                          style={{ transformOrigin: 'bottom' }}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        {toMonthDay(d.day)}: {d.count} messages
+                      </TooltipContent>
+                    </Tooltip>
+                    <text
+                      x={x + 12}
+                      y={160}
+                      textAnchor="middle"
+                      className="fill-muted-foreground/50"
+                      fontSize="8"
+                    >
+                      {toShortDay(d.day)}
+                    </text>
+                  </g>
+                );
+              })}
             </svg>
-            <div className="text-center mt-1">
-              <p className="text-xs font-medium text-muted-foreground">Historical chart data</p>
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                Daily activity tracking will appear here as you use the agent over time.
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   MODEL USAGE CARD
+   ═══════════════════════════════════════════ */
+
+function ModelUsageCard({ models, loading }: { models: ModelUsage[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Bot className="w-4 h-4 text-chart-3" />
+              Model Usage
+            </CardTitle>
+            <CardDescription>Loading model data...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[200px] flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  if (models.length === 0) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Bot className="w-4 h-4 text-chart-3" />
+              Model Usage
+            </CardTitle>
+            <CardDescription>Distribution across models</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[200px] flex flex-col items-center justify-center">
+              <div className="p-3 rounded-full bg-muted/50 mb-3">
+                <Bot className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-medium text-muted-foreground">No model data yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Start chatting to see model distribution.
               </p>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  const totalTokens = models.reduce((s, m) => s + m.totalTokens, 0) || 1;
+
+  const chartColors = [
+    'hsl(var(--chart-1))',
+    'hsl(var(--chart-2))',
+    'hsl(var(--chart-3))',
+    'hsl(var(--chart-4))',
+    'hsl(var(--chart-5))',
+  ];
+
+  return (
+    <motion.div variants={itemVariants}>
+      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Bot className="w-4 h-4 text-chart-3" />
+            Model Usage
+          </CardTitle>
+          <CardDescription>{models.length} model{models.length !== 1 ? 's' : ''} used</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Horizontal bar chart */}
+          <div className="space-y-3">
+            {models.slice(0, 5).map((model, i) => {
+              const pct = totalTokens > 0 ? Math.round((model.totalTokens / totalTokens) * 100) : 0;
+              return (
+                <div key={model.model} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: chartColors[i % chartColors.length] }}
+                      />
+                      <span className="text-sm font-medium truncate">{model.model}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-muted-foreground">{model.sessions} sessions</span>
+                      <Badge variant="secondary" className="text-xs">{pct}%</Badge>
+                    </div>
+                  </div>
+                  <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                    <motion.div
+                      className="absolute inset-y-0 left-0 rounded-full"
+                      style={{ backgroundColor: chartColors[i % chartColors.length] }}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${pct}%` }}
+                      transition={{ duration: 0.8, delay: 0.2 + i * 0.1, ease: 'easeOut' }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground/70">
+                    <span>{formatNumber(model.totalTokens)} tokens</span>
+                    <span>{model.toolCalls} tool calls</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   TOOL USAGE CARD
+   ═══════════════════════════════════════════ */
+
+function ToolUsageCard({ tools, loading }: { tools: ToolUsage[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-chart-2" />
+              Tool Usage
+            </CardTitle>
+            <CardDescription>Loading tool data...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[200px] flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  if (tools.length === 0) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="h-full hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-chart-2" />
+              Tool Usage
+            </CardTitle>
+            <CardDescription>Top tools by invocation count</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[200px] flex flex-col items-center justify-center">
+              <div className="p-3 rounded-full bg-muted/50 mb-3">
+                <Wrench className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-medium text-muted-foreground">No tool data yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Tools used by the agent will appear here.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  const maxCount = Math.max(...tools.map(t => t.count), 1);
+  const topTools = tools.slice(0, 10);
+
+  return (
+    <motion.div variants={itemVariants}>
+      <Card className="h-full hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-chart-2" />
+                Tool Usage
+              </CardTitle>
+              <CardDescription>
+                Top {topTools.length} tool{topTools.length !== 1 ? 's' : ''} by frequency
+              </CardDescription>
+            </div>
+            <Badge variant="outline" className="text-xs">
+              {tools.reduce((s, t) => s + t.count, 0)} total
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2.5 max-h-[280px] overflow-y-auto custom-scrollbar">
+            {topTools.map((tool, i) => {
+              const barWidth = Math.max((tool.count / maxCount) * 100, tool.count > 0 ? 3 : 0);
+              return (
+                <div key={tool.tool} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium truncate max-w-[180px]" title={tool.tool}>
+                      {tool.tool}
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-muted-foreground tabular-nums">{tool.count}</span>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                        {tool.percentage}%
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
+                    <motion.div
+                      className="absolute inset-y-0 left-0 rounded-full bg-chart-2"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${barWidth}%` }}
+                      transition={{ duration: 0.6, delay: 0.15 + i * 0.04, ease: 'easeOut' }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   SESSION INSIGHTS MINI-CARD
+   ═══════════════════════════════════════════ */
+
+function SessionInsightsCard({ overview, loading }: { overview: InsightsOverview | null; loading: boolean }) {
+  if (loading || !overview) {
+    return (
+      <motion.div variants={itemVariants}>
+        <Card className="hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-chart-4" />
+              Session Insights
+            </CardTitle>
+            <CardDescription>Loading...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3 animate-pulse">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-4 bg-muted rounded w-full" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  const total = overview.userMessages + overview.assistantMessages + overview.toolMessages || 1;
+  const userPct = Math.round((overview.userMessages / total) * 100);
+  const assistantPct = Math.round((overview.assistantMessages / total) * 100);
+  const toolPct = Math.round((overview.toolMessages / total) * 100);
+
+  return (
+    <motion.div variants={itemVariants}>
+      <Card className="hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <PieChart className="w-4 h-4 text-chart-4" />
+                Session Insights
+              </CardTitle>
+              <CardDescription>Message breakdown &amp; cost estimate</CardDescription>
+            </div>
+            {overview.estimatedCost > 0 && (
+              <Badge variant="outline" className="text-xs gap-1 border-chart-4/30 text-chart-4">
+                <DollarSign className="w-3 h-3" />
+                ${overview.estimatedCost.toFixed(2)}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Message breakdown bars */}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-chart-1" />
+                  User Messages
+                </span>
+                <span className="text-xs text-muted-foreground">{overview.userMessages} ({userPct}%)</span>
+              </div>
+              <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full bg-chart-1"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${userPct}%` }}
+                  transition={{ duration: 0.8, delay: 0.2, ease: 'easeOut' }}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-chart-2" />
+                  Assistant Messages
+                </span>
+                <span className="text-xs text-muted-foreground">{overview.assistantMessages} ({assistantPct}%)</span>
+              </div>
+              <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full bg-chart-2"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${assistantPct}%` }}
+                  transition={{ duration: 0.8, delay: 0.3, ease: 'easeOut' }}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-chart-5" />
+                  Tool Messages
+                </span>
+                <span className="text-xs text-muted-foreground">{overview.toolMessages} ({toolPct}%)</span>
+              </div>
+              <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full bg-chart-5"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${toolPct}%` }}
+                  transition={{ duration: 0.8, delay: 0.4, ease: 'easeOut' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Quick stats row */}
+          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
+            <div className="text-center">
+              <p className="text-lg font-bold tabular-nums">{overview.avgMessagesPerSession}</p>
+              <p className="text-[10px] text-muted-foreground">Avg msgs/session</p>
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-bold tabular-nums">{formatNumber(overview.totalTokens)}</p>
+              <p className="text-[10px] text-muted-foreground">Total tokens</p>
             </div>
           </div>
         </CardContent>
@@ -903,118 +1446,17 @@ function EmptyDashboard() {
 }
 
 /* ═══════════════════════════════════════════
-   TOKEN USAGE CHART — Placeholder (no historical tracking)
-   ═══════════════════════════════════════════ */
-
-function TokenUsageMiniChart({ totalTokens }: { totalTokens: number }) {
-  const formatted = totalTokens >= 1000000
-    ? `${(totalTokens / 1000000).toFixed(1)}M`
-    : totalTokens >= 1000
-      ? `${(totalTokens / 1000).toFixed(1)}k`
-      : String(totalTokens);
-
-  return (
-    <motion.div variants={itemVariants}>
-      <Card className="hover:shadow-md transition-shadow duration-200">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="w-4 h-4 text-chart-4" />
-                Token Usage
-              </CardTitle>
-              <CardDescription>Daily token consumption (7 days)</CardDescription>
-            </div>
-            <span className="text-xs text-muted-foreground font-medium">{formatted} total</span>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[160px] flex flex-col items-center justify-center">
-            <svg viewBox="0 0 300 120" className="w-full max-w-[300px] h-auto" preserveAspectRatio="xMidYMid meet">
-              <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--chart-4))" stopOpacity="0.3" />
-                  <stop offset="100%" stopColor="hsl(var(--chart-4))" stopOpacity="0.02" />
-                </linearGradient>
-                <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="hsl(var(--chart-4))" stopOpacity="0.4" />
-                  <stop offset="50%" stopColor="hsl(var(--chart-4))" stopOpacity="0.7" />
-                  <stop offset="100%" stopColor="hsl(var(--chart-4))" stopOpacity="0.5" />
-                </linearGradient>
-              </defs>
-              {/* Grid lines */}
-              {[30, 55, 80].map((y) => (
-                <line
-                  key={y}
-                  x1="20"
-                  y1={y}
-                  x2="280"
-                  y2={y}
-                  stroke="currentColor"
-                  strokeOpacity="0.06"
-                  strokeWidth="1"
-                />
-              ))}
-              {/* Area fill */}
-              <motion.path
-                d="M20,85 C60,70 80,40 120,50 C160,60 180,30 220,45 C240,52 260,65 280,55 L280,100 L20,100 Z"
-                fill="url(#areaGrad)"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 1.2, delay: 0.3 }}
-              />
-              {/* Line */}
-              <motion.path
-                d="M20,85 C60,70 80,40 120,50 C160,60 180,30 220,45 C240,52 260,65 280,55"
-                fill="none"
-                stroke="url(#lineGrad)"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.5, delay: 0.2, ease: 'easeInOut' }}
-              />
-              {/* Dot accents */}
-              {[
-                { cx: 20, cy: 85 },
-                { cx: 120, cy: 50 },
-                { cx: 220, cy: 45 },
-                { cx: 280, cy: 55 },
-              ].map((dot, i) => (
-                <motion.circle
-                  key={i}
-                  cx={dot.cx}
-                  cy={dot.cy}
-                  r={3}
-                  fill="hsl(var(--chart-4))"
-                  initial={{ r: 0, opacity: 0 }}
-                  animate={{ r: 3, opacity: 0.8 }}
-                  transition={{ duration: 0.4, delay: 0.8 + i * 0.15 }}
-                />
-              ))}
-            </svg>
-            <div className="text-center mt-1">
-              <p className="text-xs font-medium text-muted-foreground">Historical token usage</p>
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                Daily breakdown will appear here as you use the agent.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-}
-
-/* ═══════════════════════════════════════════
    MAIN DASHBOARD VIEW
    ═══════════════════════════════════════════ */
 
 export function DashboardView() {
   const agentStatus = useAppStore((s) => s.agentStatus);
   const [stats, setStats] = useState<ApiStats | null>(null);
+  const [insights, setInsights] = useState<InsightsReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [insightsLoading, setInsightsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [insightsDays] = useState(30);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
@@ -1032,9 +1474,25 @@ export function DashboardView() {
     }
   }, []);
 
+  const fetchInsights = useCallback(async () => {
+    setInsightsLoading(true);
+    try {
+      const res = await fetch(`/api/insights?days=${insightsDays}`);
+      if (!res.ok) throw new Error('Failed to fetch insights');
+      const data: InsightsReport = await res.json();
+      setInsights(data);
+    } catch (err) {
+      console.error('Failed to fetch insights:', err);
+      // Insights failure is non-fatal — still show stats
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [insightsDays]);
+
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+    fetchInsights();
+  }, [fetchStats, fetchInsights]);
 
   // Show empty state when agent is disconnected and no sessions
   if (!loading && !error && (!stats || (stats.totalSessions === 0 && agentStatus === 'disconnected'))) {
@@ -1058,12 +1516,28 @@ export function DashboardView() {
               Monitor your agent&apos;s performance, usage, and system health at a glance.
             </p>
           </div>
-          {error && (
-            <div className="flex items-center gap-2 text-xs text-destructive">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span>{error}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {error && (
+              <div className="flex items-center gap-2 text-xs text-destructive">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>{error}</span>
+              </div>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => { fetchStats(); fetchInsights(); }}
+                  disabled={loading || insightsLoading}
+                >
+                  <RefreshCw className={cn('w-4 h-4', (loading || insightsLoading) && 'animate-spin')} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh all data</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </motion.div>
 
@@ -1073,8 +1547,8 @@ export function DashboardView() {
         initial="hidden"
         animate="visible"
       >
-        {/* ─── Top Row: Stat Cards ─── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* ─── Top Row: Stat Cards (5 columns) ─── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <AgentStatusCard />
           <TotalSessionsCard
             total={stats?.totalSessions ?? 0}
@@ -1089,16 +1563,39 @@ export function DashboardView() {
             total={stats?.totalTokens ?? 0}
             loading={loading}
           />
+          <ToolCallsCard
+            total={insights?.overview.totalToolCalls ?? 0}
+            loading={insightsLoading}
+          />
         </div>
 
-        {/* ─── Middle Row: Charts ─── */}
+        {/* ─── Middle Row: Activity Chart + Session Insights ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ActivityChartCard />
-          <SystemResourcesCard />
+          <ActivityChartCard
+            data={insights?.activity ?? null}
+            loading={insightsLoading}
+            days={insightsDays}
+          />
+          <SessionInsightsCard
+            overview={insights?.overview ?? null}
+            loading={insightsLoading}
+          />
         </div>
 
-        {/* ─── Token usage mini chart ─── */}
-        <TokenUsageMiniChart totalTokens={stats?.totalTokens ?? 0} />
+        {/* ─── Model Usage + Tool Usage ─── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ModelUsageCard
+            models={insights?.models ?? []}
+            loading={insightsLoading}
+          />
+          <ToolUsageCard
+            tools={insights?.tools ?? []}
+            loading={insightsLoading}
+          />
+        </div>
+
+        {/* ─── System Resources ─── */}
+        <SystemResourcesCard />
 
         {/* ─── Bottom Row: Sessions + Quick Actions ─── */}
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">

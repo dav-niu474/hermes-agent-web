@@ -153,3 +153,61 @@ export type { DefaultSkill } from "./default-skills";
 export { REGISTERED_TOOL_COUNT } from "./registered-tools";
 // Ensure tools are registered when this module is imported
 import "./registered-tools";
+
+// Smart model routing — intelligent model selection for simple vs complex queries
+export {
+  chooseCheapModelRoute,
+  resolveTurnRoute,
+  formatRoutingDecision,
+} from "./smart-model-routing";
+export type { RoutingConfig, RoutingDecision } from "./smart-model-routing";
+
+// Prompt caching — Anthropic prompt caching for cost/latency reduction
+export {
+  applyAnthropicCacheControl,
+  applyCacheControlWithOptions,
+  buildCachedSystemMessage,
+  estimateCacheSavings,
+  formatCacheSummary,
+} from "./prompt-caching";
+export type {
+  CacheControl,
+  ApiMessage,
+  ApiContentBlock,
+  CacheStrategy,
+  CachingOptions,
+} from "./prompt-caching";
+
+// Credential pool — API key rotation and failover
+export { CredentialPool } from "./credential-pool";
+export type {
+  CredentialEntry,
+  RotationStrategy,
+  PoolStatus,
+} from "./credential-pool";
+
+// Context compressor — automatic context window compression for long conversations
+export { ContextCompressor } from "./context-compressor";
+export type {
+  CompressorConfig,
+  CompressionResult,
+  CompressorStatus,
+  SummarizeFn,
+} from "./context-compressor";
+
+// Title generator — auto-generate session titles from first user/assistant exchange
+export { generateTitle } from "./title-generator";
+
+// Usage pricing — token cost estimation across providers
+export {
+  estimateUsageCost,
+  getPricingEntry,
+  hasKnownPricing,
+  getPerMillionPricing,
+  formatTokenCountCompact,
+  formatDurationCompact,
+} from "./usage-pricing";
+export type { PricingEntry, CostResult } from "./usage-pricing";
+
+// Redaction — regex-based PII/secret redaction for logs and tool output
+export { redactSensitiveText } from "./redact";
