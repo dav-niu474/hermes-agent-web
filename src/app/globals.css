@@ -487,15 +487,10 @@
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
-/* Smooth transitions for theme switching — only on themed containers */
+/* Smooth transitions for theme switching — only on layout containers */
 body, main, aside, header, nav, section, article {
   transition-property: background-color, border-color;
   transition-duration: 300ms;
-  transition-timing-function: ease;
-}
-div, span, p {
-  transition-property: background-color, border-color, color;
-  transition-duration: 200ms;
   transition-timing-function: ease;
 }
 

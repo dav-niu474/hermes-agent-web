@@ -92,19 +92,8 @@ const themeStyles: { id: ThemeStyle; color: string; ring: string }[] = [
 function HermesLogo({ collapsed }: { collapsed?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <motion.div
-        className="relative flex items-center justify-center shrink-0"
-        whileHover={{ scale: 1.08, rotate: 3 }}
-        whileTap={{ scale: 0.92 }}
-      >
-        {/* Animated outer glow ring */}
-        <motion.div
-          className="absolute inset-[-3px] rounded-2xl bg-gradient-to-br from-primary/40 via-primary/10 to-transparent"
-          animate={{ opacity: [0.6, 1, 0.6], scale: [1, 1.05, 1] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        {/* Main orb with refined gradient */}
-        <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary via-primary/95 to-primary/85 flex items-center justify-center shadow-lg shadow-primary/25 ring-1 ring-white/10">
+      <div className="relative flex items-center justify-center shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
           {/* Winged helmet SVG */}
           <svg
             viewBox="0 0 24 24"
@@ -121,21 +110,16 @@ function HermesLogo({ collapsed }: { collapsed?: boolean }) {
             <path d="M19.5 10L22 8.5C22.5 8 23 8.5 22.5 9L19.5 12" />
           </svg>
         </div>
-      </motion.div>
+      </div>
       {!collapsed && (
-        <motion.div
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.3, delay: 0.05, ease: 'easeOut' }}
-          className="flex flex-col"
-        >
+        <div className="flex flex-col">
           <span className="text-sm font-bold tracking-tight text-foreground leading-none">
             Hermes
           </span>
-          <span className="text-[10px] font-medium text-muted-foreground/80 leading-none mt-0.5">
+          <span className="text-[10px] font-medium text-muted-foreground/70 leading-none mt-0.5">
             AI Agent Platform
           </span>
-        </motion.div>
+        </div>
       )}
     </div>
   );
@@ -242,21 +226,11 @@ function DarkModeToggle({ collapsed }: { collapsed?: boolean }) {
             collapsed && 'w-8 justify-center',
           )}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={isDark ? 'dark' : 'light'}
-              initial={{ rotate: -90, opacity: 0 }}
-              animate={{ rotate: 0, opacity: 1 }}
-              exit={{ rotate: 90, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              {isDark ? (
-                <Sun className="size-4 shrink-0" />
-              ) : (
-                <Moon className="size-4 shrink-0" />
-              )}
-            </motion.div>
-          </AnimatePresence>
+          {isDark ? (
+            <Sun className="size-4 shrink-0" />
+          ) : (
+            <Moon className="size-4 shrink-0" />
+          )}
           {!collapsed && (
             <span className="text-xs font-medium truncate">
               {isDark ? 'Light Mode' : 'Dark Mode'}
@@ -288,31 +262,19 @@ function SidebarNavItem({
   const Icon = item.icon;
 
   const button = (
-    <motion.button
+    <button
       onClick={() => onSelect(item.id)}
       className={cn(
-        'group relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-all duration-200',
+        'group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
         collapsed ? 'justify-center px-0' : '',
         isActive
-          ? 'bg-primary/10 text-primary shadow-sm'
+          ? 'bg-accent text-accent-foreground'
           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
       )}
-      whileHover={{ x: collapsed ? 0 : 2 }}
-      whileTap={{ scale: 0.97 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
-      {/* Active indicator bar */}
-      {isActive && (
-        <motion.div
-          layoutId="sidebar-active-indicator"
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-full"
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        />
-      )}
-
       <Icon
         className={cn(
-          'size-[18px] shrink-0 transition-all duration-200',
+          'size-[18px] shrink-0',
           isActive
             ? 'text-primary'
             : 'text-muted-foreground group-hover:text-foreground',
@@ -321,11 +283,7 @@ function SidebarNavItem({
       {!collapsed && (
         <span className="truncate">{item.label}</span>
       )}
-      {/* Hover glow effect */}
-      {!collapsed && !isActive && (
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-      )}
-    </motion.button>
+    </button>
   );
 
   if (collapsed) {
@@ -516,20 +474,20 @@ function ChatHistorySection({
           </p>
         ) : (
           <AnimatePresence>
-            {sessions.map((session, index) => {
+            {sessions.map((session) => {
               const isActive = currentSessionId === session.id;
               const timeAgo = formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true });
               return (
                 <motion.div
                   key={session.id}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.03, duration: 0.2 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.15 }}
                   onClick={() => handleSelectSession(session.id)}
                   className={cn(
-                    'group flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-200',
+                    'group flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors',
                     isActive
-                      ? 'bg-primary/10 text-primary shadow-sm'
+                      ? 'bg-accent text-accent-foreground'
                       : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                     loadingSession && 'pointer-events-none opacity-60'
                   )}
@@ -710,7 +668,7 @@ export function Sidebar() {
 
       {/* Desktop sidebar */}
       <motion.aside
-        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border/50 bg-sidebar/95 backdrop-blur-xl overflow-hidden shrink-0"
+        className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border/50 bg-sidebar overflow-hidden shrink-0"
         animate={{ width: collapsed ? 56 : 240 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >

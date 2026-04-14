@@ -495,17 +495,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
-      className={cn('group flex gap-2.5 px-4', isUser ? 'my-4 flex-row-reverse' : 'my-3 flex-row')}
+      transition={{ duration: 0.15 }}
+      className={cn('group flex gap-2.5 px-4', isUser ? 'my-3 flex-row-reverse' : 'my-2 flex-row')}
     >
-      <Avatar className={cn('size-8 shrink-0 mt-1', isUser ? 'bg-primary' : 'bg-muted ring-1 ring-border/50')}>
-        <AvatarFallback className={cn('text-[11px]', isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
-          {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
+      <Avatar className={cn('size-7 shrink-0 mt-0.5', isUser ? 'bg-primary' : 'bg-muted')}>
+        <AvatarFallback className={cn('text-[10px]', isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+          {isUser ? <User className="size-3" /> : <Bot className="size-3" />}
         </AvatarFallback>
       </Avatar>
-      <div className={cn('max-w-[88%] min-w-0 flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('flex-1 min-w-0 flex flex-col', isUser ? 'items-end' : 'items-start')}>
         {/* Thinking / Reasoning Block */}
         {!isUser && hasReasoning && (
           <ThinkingBlock reasoning={message.reasoning!} isStreaming={message.isStreaming} reasoningComplete={message.reasoningComplete} />
@@ -520,17 +520,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
 
-        {/* Main content bubble */}
+        {/* Main content */}
         {(isUser || message.content) && (
           <div
             className={cn(
-              'rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
+              'text-[13px] leading-relaxed',
               isUser
-                ? 'bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-tr-sm'
-                : cn(
-                    'bg-card border border-border/50 border-l-2 border-l-primary/20 rounded-tl-sm shadow-sm',
-                    (hasReasoning || hasToolCalls) && 'rounded-tl-lg'
-                  )
+                ? 'bg-primary text-primary-foreground rounded-2xl px-3.5 py-2 max-w-[85%]'
+                : 'py-0.5'
             )}
           >
             {isUser ? (
@@ -547,14 +544,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             ) : (
               <MediaContent content={message.content || ' '} />
             )}
-            {/* Streaming cursor with smooth fade-out on completion */}
+            {/* Streaming cursor */}
             {!isUser && (
               <AnimatePresence>
                 {message.isStreaming && message.content && (
                   <motion.span
                     key="streaming-cursor"
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                    transition={{ duration: 0.3 }}
                     className="streaming-cursor"
                   />
                 )}
@@ -563,41 +560,41 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
 
-        {/* "Processing results..." indicator after tool calls complete, before content arrives */}
+        {/* "Processing results..." indicator */}
         {showProcessingResults && (
-          <div className="flex items-center gap-2 px-1 py-1">
+          <div className="flex items-center gap-1.5 py-0.5">
             <Zap className="size-3 text-primary/60 animate-pulse" />
-            <span className="text-[11px] text-muted-foreground/60 font-medium">Processing results...</span>
+            <span className="text-[11px] text-muted-foreground/60">Processing results...</span>
           </div>
         )}
 
-        {/* Streaming indicator when no content yet but only reasoning is happening */}
+        {/* Streaming indicator when only reasoning */}
         {!isUser && !message.content && message.isStreaming && hasReasoning && !hasToolCalls && !message.reasoningComplete && (
-          <div className="flex items-center gap-1.5 px-1 py-0.5">
+          <div className="flex items-center gap-1.5 py-0.5">
             <Loader2 className="size-3 animate-spin text-violet-400/50" />
             <span className="text-[10px] text-muted-foreground/50">Thinking...</span>
           </div>
         )}
 
-        <div className={cn('flex items-center gap-1.5 px-1 h-4', isUser ? 'flex-row-reverse' : 'flex-row')}>
-          {timeStr && <span className="text-[10px] text-muted-foreground/60">{timeStr}</span>}
+        <div className={cn('flex items-center gap-1.5 h-4', isUser ? 'flex-row-reverse' : 'flex-row')}>
+          {timeStr && <span className="text-[10px] text-muted-foreground/50">{timeStr}</span>}
           {!isUser && !message.isStreaming && message.content && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-5 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity"
+                  className="size-5 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={handleCopy}
                 >
                   {copied ? <Check className="size-2.5 text-emerald-500" /> : <Copy className="size-2.5" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">Copy response</TooltipContent>
+              <TooltipContent side="bottom" className="text-xs">Copy</TooltipContent>
             </Tooltip>
           )}
-          {message.duration && <span className="text-[10px] text-muted-foreground/60">{(message.duration / 1000).toFixed(1)}s</span>}
-          {message.tokens && <span className="text-[10px] text-muted-foreground/60">{message.tokens} tokens</span>}
+          {message.duration && <span className="text-[10px] text-muted-foreground/50">{(message.duration / 1000).toFixed(1)}s</span>}
+          {message.tokens && <span className="text-[10px] text-muted-foreground/50">{message.tokens} tokens</span>}
         </div>
       </div>
     </motion.div>
@@ -610,101 +607,46 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string) => void }) {
   return (
-    <div className="flex items-center justify-center h-full px-4 relative overflow-hidden">
-      {/* Animated mesh gradient background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute w-[600px] h-[600px] -top-48 -right-48 rounded-full bg-gradient-to-br from-primary/[0.07] via-primary/[0.03] to-transparent blur-3xl"
-          animate={{ scale: [1, 1.1, 1], rotate: [0, 5, 0] }}
-          transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <motion.div
-          className="absolute w-[500px] h-[500px] -bottom-40 -left-40 rounded-full bg-gradient-to-tr from-primary/[0.05] via-primary/[0.02] to-transparent blur-3xl"
-          animate={{ scale: [1, 1.15, 1], rotate: [0, -5, 0] }}
-          transition={{ duration: 25, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="text-center max-w-lg w-full relative z-10"
-      >
-        {/* Hero Icon with animated rings */}
-        <motion.div
-          className="relative mx-auto w-24 h-24 mb-6"
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.1, ease: 'easeOut' }}
-        >
-          {/* Outer animated ring */}
-          <motion.div
-            className="absolute -inset-2 rounded-3xl border border-primary/10"
-            animate={{ scale: [1, 1.05, 1], opacity: [0.3, 0.6, 0.3] }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          {/* Glow layer */}
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/30 via-primary/10 to-transparent blur-xl" />
-          {/* Main icon */}
-          <div className="relative w-24 h-24 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-xl shadow-primary/20 ring-1 ring-white/10">
-            <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <div className="flex items-center justify-center h-full px-4">
+      <div className="text-center max-w-lg w-full">
+        {/* Hero Icon */}
+        <div className="relative mx-auto w-16 h-16 mb-5">
+          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-primary-foreground" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3C8 3 5 6 4.5 10L4 13H20L19.5 10C19 6 16 3 12 3Z" />
               <path d="M3 13C3 13 4 15 12 15C20 15 21 13 21 13" />
               <path d="M4.5 10L2 8.5C1.5 8 1 8.5 1.5 9L4.5 12" />
               <path d="M19.5 10L22 8.5C22.5 8 23 8.5 22.5 9L19.5 12" />
             </svg>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.h1
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="text-3xl font-bold tracking-tight mb-2"
-        >
+        <h1 className="text-2xl font-bold tracking-tight mb-1.5">
           Hermes Agent
-        </motion.h1>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="text-muted-foreground text-base opacity-70 mb-8 max-w-sm mx-auto"
-        >
-          Multi-model AI assistant with tools, memory, and reasoning capabilities
-        </motion.p>
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full"
-        >
-          {SUGGESTIONS.map((s, i) => (
-            <motion.button
+        </h1>
+        <p className="text-muted-foreground text-sm mb-8 max-w-xs mx-auto">
+          Multi-model AI assistant with tools, memory, and reasoning
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+          {SUGGESTIONS.map((s) => (
+            <button
               key={s.text}
               onClick={() => onSuggestionClick(s.text)}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.45 + i * 0.08 }}
               className={cn(
-                'group relative flex items-start gap-2.5 p-3.5 rounded-xl text-left overflow-hidden',
-                'border border-border/40 bg-card/50 backdrop-blur-sm',
-                'hover:bg-card/80 hover:border-primary/30 hover:shadow-md hover:shadow-primary/[0.03]',
-                'transition-all duration-300',
+                'group flex items-start gap-2.5 p-3 rounded-xl text-left',
+                'border border-border/40 bg-card/50',
+                'hover:bg-card hover:border-border',
+                'transition-colors duration-150',
               )}
-              whileHover={{ y: -2, scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
             >
-              {/* Subtle hover glow */}
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <div className={cn('p-1.5 rounded-lg shrink-0 transition-transform duration-300 group-hover:scale-110', s.bg)}>
+              <div className={cn('p-1.5 rounded-lg shrink-0', s.bg)}>
                 <s.icon className={cn('size-3.5', s.color)} />
               </div>
-              <p className="text-xs font-medium text-foreground leading-snug relative z-10">{s.text}</p>
-            </motion.button>
+              <p className="text-xs font-medium text-foreground/80 leading-snug">{s.text}</p>
+            </button>
           ))}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1382,7 +1324,7 @@ export function ChatView() {
       {/* ─── Chat Area ─── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header — fixed at top */}
-        <header className="shrink-0 border-b border-border/50 bg-gradient-to-r from-background/95 via-background/90 to-background/95 backdrop-blur-sm px-3 sm:px-4 py-3 flex items-center justify-between gap-2 z-10">
+        <header className="shrink-0 border-b border-border/50 bg-background px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 z-10">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate leading-tight">
@@ -1433,17 +1375,17 @@ export function ChatView() {
           <ScrollToBottom onClick={scrollToBottom} />
         </div>
 
-        {/* Input Area — fixed at bottom with premium glass effect */}
-        <div className="shrink-0 border-t border-border/40 bg-gradient-to-t from-background via-background/95 to-background/80 backdrop-blur-xl px-3 sm:px-4 py-3">
+        {/* Input Area — fixed at bottom */}
+        <div className="shrink-0 border-t border-border/40 bg-background px-3 sm:px-4 py-3">
           <div className="max-w-3xl mx-auto">
             <motion.div
               className={cn(
-                'relative flex items-end gap-1.5 rounded-xl border p-1.5 transition-all duration-300',
-                'bg-card/60 backdrop-blur-sm',
+                'relative flex items-center gap-1.5 rounded-xl border p-1.5 transition-all duration-200',
+                'bg-card',
                 isStreaming
-                  ? 'border-primary/40 shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_0_20px_hsl(var(--primary)/0.1)]'
-                  : 'border-border/60 shadow-sm hover:border-border/80 hover:shadow-md',
-                'focus-within:border-primary/50 focus-within:shadow-[0_0_24px_rgba(var(--primary),0.08)]',
+                  ? 'border-primary/40'
+                  : 'border-border/60 hover:border-border',
+                'focus-within:border-primary/50',
               )}
             >
               <input
@@ -1474,9 +1416,27 @@ export function ChatView() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Message Hermes Agent..."
-                className="flex-1 min-h-[36px] max-h-[200px] resize-none border-0 bg-transparent p-0 px-2 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
+                className="flex-1 min-h-[32px] max-h-[200px] resize-none border-0 bg-transparent px-2 py-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60 leading-[32px]"
                 rows={1}
                 disabled={isStreaming}
+                onInput={() => {
+                  // Switch to items-end when textarea grows beyond single line
+                  const el = textareaRef.current;
+                  if (el) {
+                    const parent = el.closest('.flex');
+                    if (parent) {
+                      if (el.scrollHeight > 32) {
+                        parent.classList.remove('items-center');
+                        parent.classList.add('items-end');
+                        el.style.removeProperty('line-height');
+                      } else {
+                        parent.classList.remove('items-end');
+                        parent.classList.add('items-center');
+                        el.style.lineHeight = '32px';
+                      }
+                    }
+                  }
+                }}
               />
 
               <Tooltip>
@@ -1489,21 +1449,16 @@ export function ChatView() {
               </Tooltip>
 
               {isStreaming ? (
-                <motion.div
-                  initial={{ scale: 0.8 }}
-                  animate={{ scale: 1 }}
-                >
-                  <Button size="icon" className="size-8 rounded-xl shrink-0 bg-red-500/90 hover:bg-red-500 text-white" onClick={handleStop}>
-                    <Square className="size-3" />
-                  </Button>
-                </motion.div>
+                <Button size="icon" className="size-8 rounded-lg shrink-0 bg-red-500/90 hover:bg-red-500 text-white" onClick={handleStop}>
+                  <Square className="size-3" />
+                </Button>
               ) : (
                 <Button
                   size="icon"
                   className={cn(
-                    'size-8 rounded-xl shrink-0 transition-all duration-200',
+                    'size-8 rounded-lg shrink-0 transition-colors duration-150',
                     input.trim() || imagePreview
-                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20 hover:scale-105'
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
                       : 'bg-muted/80 text-muted-foreground'
                   )}
                   onClick={handleSend}
@@ -1563,8 +1518,8 @@ export function ChatView() {
                 </motion.div>
               )}
             </AnimatePresence>
-            <p className="text-center text-[10px] text-muted-foreground/40 mt-1.5 select-none">
-              Hermes Agent &middot; Enter to send, Shift+Enter for new line
+            <p className="text-center text-[10px] text-muted-foreground/40 mt-1 select-none">
+              Enter to send, Shift+Enter for new line
             </p>
           </div>
         </div>

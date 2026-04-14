@@ -1422,3 +1422,37 @@ Stage Summary:
 - No logic changes, only CSS/styling modifications
 - ESLint: zero new errors in modified file
 - Dev server compiles successfully
+
+---
+Task ID: 1
+Agent: main
+Task: Fix UI issues - input text centering, remove useless message bubbles, clean up over-designed effects
+
+Work Log:
+- Read and analyzed chat-view.tsx (1575 lines), sidebar.tsx (748 lines), view-router.tsx, globals.css
+- Identified issues from previous "polish" commit (e67b036) that made UI worse:
+  - Input textarea used `items-end` with `min-h-[36px]` vs buttons `size-8` (32px) causing text misalignment
+  - Assistant messages had unnecessary card wrapping: `bg-card border border-border/50 border-l-2 shadow-sm`
+  - User messages had excessive gradient: `bg-gradient-to-br from-primary to-primary/90`
+  - Welcome screen had animated floating orbs, mesh gradients, glow layers, pulsing rings
+  - Sidebar logo had animated glow ring, hover/tap spring animations
+  - Nav items had `whileHover={{ x: 2 }}`, `whileTap={{ scale: 0.97 }}`, active indicator bar, hover glow
+  - Dark mode toggle had rotating AnimatePresence icon swap
+  - CSS had broad `div, span, p { transition }` rules causing potential performance issues
+- Fixed input area: changed to `items-center` with `min-h-[32px]` and `leading-[32px]` for perfect vertical centering with buttons; added `onInput` handler to switch to `items-end` when textarea grows multi-line
+- Simplified message bubbles:
+  - User: solid `bg-primary` with `rounded-2xl`, no gradient, no corner cuts
+  - Assistant: NO bubble at all - just text content with `py-0.5`, no bg/border/shadow
+- Simplified Welcome Screen: removed all motion animations, floating orbs, glow layers, pulsing rings; static icon, simple grid for suggestions
+- Simplified sidebar: removed animated glow ring from logo, removed spring animations from nav items, removed active indicator bar, removed hover glow effect, removed AnimatePresence from dark mode toggle
+- Simplified header: removed gradient background and backdrop-blur
+- Simplified input area: removed streaming glow ring, removed send button shadow/scale effect
+- Cleaned CSS: removed broad `div, span, p` transition rule that could cause jank
+- Reduced avatar sizes from 8 to 7
+
+Stage Summary:
+- Input text now vertically centered with action buttons
+- Assistant messages have clean, no-bubble layout (like ChatGPT/Claude)
+- User messages have simple solid primary color bubble
+- All excessive animations, glows, gradients, shadows removed
+- UI is now clean, minimal, and professional
