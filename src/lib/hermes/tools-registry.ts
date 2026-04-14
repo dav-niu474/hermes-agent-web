@@ -845,7 +845,7 @@ export const ALL_TOOLS: ToolDefinition[] = [
       },
       required: ["action"],
     },
-    isWebCompatible: false,
+    isWebCompatible: true,
   },
 
   // ===== Smart Home =====

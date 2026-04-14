@@ -947,28 +947,115 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     try {
       const cronModule = await import("@/lib/cron-client");
       switch (action) {
+        // ── List ──────────────────────────────────────────────
         case "list": {
           const jobs = await cronModule.listCronJobs();
-          return JSON.stringify({ jobs, total: jobs.length });
+          if (jobs.length === 0) {
+            return JSON.stringify({ jobs: [], total: 0, message: "No cron jobs found." });
+          }
+          return JSON.stringify({
+            jobs,
+            total: jobs.length,
+            message: `Found ${jobs.length} cron job(s).`,
+          });
         }
+
+        // ── Create ────────────────────────────────────────────
         case "create": {
+          // Accept both "prompt" (schema name) and "task" (legacy name)
+          const task = String(args.prompt ?? args.task ?? "");
           const name = String(args.name ?? "");
           const schedule = String(args.schedule ?? "");
-          const task = String(args.task ?? "");
-          if (!name || !schedule || !task) {
-            return JSON.stringify({ error: "Missing required parameters: name, schedule, task" });
+          const repeat = args.repeat !== undefined ? Number(args.repeat) : undefined;
+
+          if (!name.trim()) {
+            return JSON.stringify({ error: "Missing required parameter: name" });
           }
-          const job = await cronModule.createCronJob({ name, schedule, task });
-          return JSON.stringify({ success: true, job, message: `Cron job '${name}' created` });
+          if (!schedule.trim()) {
+            return JSON.stringify({ error: "Missing required parameter: schedule (e.g. '30m', 'every 2h', '0 9 * * *')" });
+          }
+          if (!task.trim()) {
+            return JSON.stringify({ error: "Missing required parameter: prompt (the task the job should execute)" });
+          }
+
+          const job = await cronModule.createCronJob({
+            name,
+            schedule,
+            task,
+            repeat: repeat !== undefined && !isNaN(repeat) ? repeat : undefined,
+          });
+          return JSON.stringify({
+            success: true,
+            job,
+            message: `Cron job '${name}' created. Schedule: ${job.schedule}. Next run: ${job.nextRunAt || 'pending'}.`,
+          });
         }
+
+        // ── Update ────────────────────────────────────────────
+        case "update": {
+          const jobId = String(args.job_id ?? "");
+          if (!jobId) {
+            return JSON.stringify({ error: "Missing required parameter: job_id" });
+          }
+
+          const updates: Record<string, unknown> = { id: jobId };
+          if (args.name !== undefined) updates.name = String(args.name);
+          if (args.schedule !== undefined) updates.schedule = String(args.schedule);
+          if (args.prompt !== undefined || args.task !== undefined) {
+            updates.task = String(args.prompt ?? args.task);
+          }
+          if (args.repeat !== undefined) updates.repeat = Number(args.repeat);
+
+          // At least one field to update
+          if (Object.keys(updates).length <= 1) {
+            return JSON.stringify({ error: "No fields to update. Provide name, schedule, task/prompt, or repeat." });
+          }
+
+          const job = await cronModule.updateCronJob(updates as any);
+          return JSON.stringify({
+            success: true,
+            job,
+            message: `Cron job '${job.name}' updated.`,
+          });
+        }
+
+        // ── Pause ─────────────────────────────────────────────
+        case "pause": {
+          const jobId = String(args.job_id ?? "");
+          if (!jobId) return JSON.stringify({ error: "Missing required parameter: job_id" });
+          const job = await cronModule.pauseCronJob(jobId);
+          return JSON.stringify({ success: true, job, message: `Cron job '${job.name}' paused.` });
+        }
+
+        // ── Resume ────────────────────────────────────────────
+        case "resume": {
+          const jobId = String(args.job_id ?? "");
+          if (!jobId) return JSON.stringify({ error: "Missing required parameter: job_id" });
+          const job = await cronModule.resumeCronJob(jobId);
+          return JSON.stringify({ success: true, job, message: `Cron job '${job.name}' resumed. Next run: ${job.nextRunAt || 'pending'}.` });
+        }
+
+        // ── Remove (alias for delete) ─────────────────────────
+        case "remove":
         case "delete": {
           const jobId = String(args.job_id ?? "");
-          if (!jobId) return JSON.stringify({ error: "Missing job_id" });
+          if (!jobId) return JSON.stringify({ error: "Missing required parameter: job_id" });
           await cronModule.deleteCronJob(jobId);
-          return JSON.stringify({ success: true, message: `Cron job ${jobId} deleted` });
+          return JSON.stringify({ success: true, message: `Cron job ${jobId} deleted.` });
         }
+
+        // ── Run (trigger immediately) ─────────────────────────
+        case "run": {
+          const jobId = String(args.job_id ?? "");
+          if (!jobId) return JSON.stringify({ error: "Missing required parameter: job_id" });
+          const job = await cronModule.triggerCronJob(jobId);
+          return JSON.stringify({ success: true, job, message: `Cron job '${job.name}' triggered to run immediately.` });
+        }
+
         default:
-          return JSON.stringify({ error: `Unknown cron action: ${action}` });
+          return JSON.stringify({
+            error: `Unknown cron action: '${action}'. Supported: create, list, update, pause, resume, remove, run.`,
+          });
       }
     } catch (err: any) {
       if (err.code === "MODULE_NOT_FOUND") {
