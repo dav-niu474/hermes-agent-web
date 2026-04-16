@@ -877,9 +877,37 @@ registry.register({
     const command = String(args.command ?? '');
     if (!command.trim()) return toolError('Missing required parameter: command');
 
-    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || 60)) * 1000;
-    let workdir = getWorkspaceRoot();
+    // Resolve terminal backend from config
+    let backend = 'local';
+    try {
+      const { loadConfig } = await import('./config');
+      const config = loadConfig();
+      backend = String((config.terminal as Record<string, unknown>)?.backend || 'local');
+    } catch { /* fall through to local */ }
 
+    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || 60));
+
+    // ── Modal backend ─────────────────────────────────────────────
+    if (backend === 'modal') {
+      try {
+        const { modalSandbox } = await import('./modal-sandbox');
+        const result = await modalSandbox.execute(command, timeout);
+        return toolResult({
+          stdout: result.stdout,
+          stderr: result.stderr || undefined,
+          exitCode: result.exitCode,
+          workdir: '/sandbox',
+          command,
+          backend: 'modal',
+          timedOut: result.timedOut,
+        });
+      } catch (err: any) {
+        return toolError(`Modal sandbox error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ── Local backend (default) ───────────────────────────────────
+    let workdir = getWorkspaceRoot();
     if (args.workdir) {
       try {
         workdir = resolveSafePath(String(args.workdir));
@@ -890,7 +918,7 @@ registry.register({
 
     try {
       const { stdout, stderr } = await execAsync(command, {
-        timeout,
+        timeout: timeout * 1000,
         maxBuffer: 1024 * 1024, // 1MB max output
         cwd: workdir,
         env: {
@@ -905,6 +933,7 @@ registry.register({
         exitCode: 0,
         workdir,
         command,
+        backend: 'local',
       });
     } catch (err: any) {
       return toolResult({
@@ -913,6 +942,7 @@ registry.register({
         exitCode: err.code || 1,
         workdir,
         command,
+        backend: 'local',
         timedOut: err.killed === true,
       });
     }

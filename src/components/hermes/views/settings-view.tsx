@@ -24,6 +24,8 @@ import {
   Check,
   AlertCircle,
   Info,
+  Cloud,
+  Lock,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -56,7 +58,7 @@ import { toast } from 'sonner';
 interface AppConfig {
   model?: Record<string, unknown>;
   agent?: { max_turns?: number; gateway_timeout?: number; tool_use_enforcement?: string };
-  terminal?: { backend?: string; timeout?: number };
+  terminal?: { backend?: string; timeout?: number; modal?: Record<string, unknown> };
   browser?: { inactivity_timeout?: number; command_timeout?: number };
   memory?: { memory_enabled?: boolean; user_profile_enabled?: boolean; memory_char_limit?: number; user_char_limit?: number };
   display?: { compact?: boolean; personality?: string; streaming?: boolean; show_reasoning?: boolean };
@@ -139,6 +141,17 @@ export function SettingsView() {
     timeout: 180,
   });
 
+  const [modalSettings, setModalSettings] = useState({
+    tokenId: '',
+    tokenSecret: '',
+    appName: 'hermes-sandbox',
+    image: 'ghcr.io/modal-labs/example-image',
+    cpu: 1,
+    memory: 512,
+    idleTimeout: 300,
+    showTokenSecret: false,
+  });
+
   const [memorySettings, setMemorySettings] = useState({
     memoryEnabled: true,
     userProfileEnabled: true,
@@ -185,6 +198,19 @@ export function SettingsView() {
       setTerminalSettings({
         backend: str(termCfg.backend, 'local'),
         timeout: num(termCfg.timeout, 180),
+      });
+
+      // Modal
+      const modalCfg = termCfg.modal as Record<string, unknown> || {};
+      setModalSettings({
+        tokenId: str(modalCfg.token_id, ''),
+        tokenSecret: str(modalCfg.token_secret, ''),
+        appName: str(modalCfg.app_name, 'hermes-sandbox'),
+        image: str(modalCfg.image, 'ghcr.io/modal-labs/example-image'),
+        cpu: num(modalCfg.cpu, 1),
+        memory: num(modalCfg.memory, 512),
+        idleTimeout: num(modalCfg.idle_timeout, 300),
+        showTokenSecret: false,
       });
 
       // Memory
@@ -319,13 +345,41 @@ export function SettingsView() {
   const handleSaveTerminal = async () => {
     setSavingSection('terminal');
     try {
-      await saveConfigSection('Terminal', {
+      const payload: Record<string, unknown> = {
         terminal: {
           backend: terminalSettings.backend,
           timeout: terminalSettings.timeout,
         },
-      });
+      };
+      await saveConfigSection('Terminal', payload);
       toast.success('Terminal settings saved');
+      loadConfig();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleSaveModal = async () => {
+    setSavingSection('modal');
+    try {
+      await saveConfigSection('Modal', {
+        terminal: {
+          backend: 'modal',
+          modal: {
+            token_id: modalSettings.tokenId,
+            token_secret: modalSettings.tokenSecret,
+            app_name: modalSettings.appName,
+            image: modalSettings.image,
+            cpu: modalSettings.cpu,
+            memory: modalSettings.memory,
+            idle_timeout: modalSettings.idleTimeout,
+          },
+        },
+      });
+      setTerminalSettings({ ...terminalSettings, backend: 'modal' });
+      toast.success('Modal sandbox settings saved');
       loadConfig();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save');
@@ -414,6 +468,7 @@ export function SettingsView() {
           case 'general': handleSaveGeneral(); break;
           case 'model': handleSaveModel(); break;
           case 'terminal': handleSaveTerminal(); break;
+          case 'modal': handleSaveModal(); break;
           case 'memory': handleSaveMemory(); break;
           case 'advanced': handleSaveAdvanced(); break;
         }
@@ -742,22 +797,25 @@ export function SettingsView() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="space-y-2">
-                        <Label className="flex items-center gap-2">
-                          Execution Backend
-                          <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800">Only Local available</Badge>
-                        </Label>
-                        <Select disabled value="local">
+                        <Label>Execution Backend</Label>
+                        <Select
+                          value={terminalSettings.backend}
+                          onValueChange={(v) => setTerminalSettings({ ...terminalSettings, backend: v })}
+                        >
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="local">Local (subprocess)</SelectItem>
+                            <SelectItem value="modal">Modal (Serverless)</SelectItem>
                             <SelectItem value="docker" disabled>Docker container (coming soon)</SelectItem>
                             <SelectItem value="ssh" disabled>SSH (Remote) (coming soon)</SelectItem>
-                            <SelectItem value="modal" disabled>Modal (Serverless) (coming soon)</SelectItem>
                             <SelectItem value="daytona" disabled>Daytona (coming soon)</SelectItem>
                           </SelectContent>
                         </Select>
                         <p className="text-[11px] text-muted-foreground">
-                          <span className="font-medium text-foreground">Current:</span> local — Commands run directly on the host machine.
+                          <span className="font-medium text-foreground">Current:</span> {terminalSettings.backend} —
+                          {terminalSettings.backend === 'local' ? ' Commands run directly on the host machine.' :
+                           terminalSettings.backend === 'modal' ? ' Commands run in Modal&apos;s cloud-based gVisor containers.' :
+                           ' Backend not available.'}
                         </p>
                       </div>
 
@@ -775,7 +833,7 @@ export function SettingsView() {
 
                       <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
                         <p className="text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">Note:</span> Terminal settings affect the agent&apos;s <code className="text-[10px] bg-muted px-1 py-0.5 rounded">terminal</code> and <code className="text-[10px] bg-muted px-1 py-0.5 rounded">execute_code</code> tools. 
+                          <span className="font-medium text-foreground">Note:</span> Terminal settings affect the agent&apos;s <code className="text-[10px] bg-muted px-1 py-0.5 rounded">terminal</code> and <code className="text-[10px] bg-muted px-1 py-0.5 rounded">execute_code</code> tools.
                           Changes apply to new tool invocations.
                         </p>
                       </div>
@@ -786,6 +844,152 @@ export function SettingsView() {
                     </CardContent>
                   </Card>
                 </motion.div>
+
+                {/* ─── Modal Sandbox Config (conditional) ─── */}
+                <AnimatePresence>
+                  {terminalSettings.backend === 'modal' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, y: 10, height: 0 }}
+                      transition={{ delay: 0.1 }}
+                    >
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Cloud className="size-4" /> Modal Sandbox Configuration
+                          </CardTitle>
+                          <CardDescription>
+                            Configure Modal (modal.com) serverless sandbox for isolated command execution in gVisor containers
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {/* Authentication */}
+                          <div className="rounded-lg border border-border/50 bg-muted/30 p-3 mb-2">
+                            <p className="text-xs text-muted-foreground mb-2">
+                              <Lock className="size-3 inline-block mr-1" />
+                              <span className="font-medium text-foreground">Authentication</span> — Get your credentials from{' '}
+                              <a href="https://modal.com/settings" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">
+                                modal.com/settings
+                              </a>
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="modal-token-id">MODAL_TOKEN_ID</Label>
+                            <Input
+                              id="modal-token-id"
+                              value={modalSettings.tokenId}
+                              onChange={(e) => setModalSettings({ ...modalSettings, tokenId: e.target.value })}
+                              placeholder="Your Modal Token ID"
+                              className="font-mono text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="modal-token-secret">MODAL_TOKEN_SECRET</Label>
+                            <div className="relative">
+                              <Input
+                                id="modal-token-secret"
+                                type={modalSettings.showTokenSecret ? 'text' : 'password'}
+                                value={modalSettings.tokenSecret}
+                                onChange={(e) => setModalSettings({ ...modalSettings, tokenSecret: e.target.value })}
+                                placeholder="Your Modal Token Secret"
+                                className="pr-10 font-mono text-xs"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute right-0 top-0 size-9"
+                                onClick={() => setModalSettings({ ...modalSettings, showTokenSecret: !modalSettings.showTokenSecret })}
+                              >
+                                {modalSettings.showTokenSecret ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                              </Button>
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          {/* App & Image */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>App Name</Label>
+                              <Input
+                                value={modalSettings.appName}
+                                onChange={(e) => setModalSettings({ ...modalSettings, appName: e.target.value })}
+                                placeholder="hermes-sandbox"
+                                className="font-mono text-sm"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Container Image</Label>
+                              <Input
+                                value={modalSettings.image}
+                                onChange={(e) => setModalSettings({ ...modalSettings, image: e.target.value })}
+                                placeholder="ghcr.io/modal-labs/example-image"
+                                className="font-mono text-xs"
+                              />
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          {/* Resources */}
+                          <div className="space-y-2">
+                            <Label>CPU Cores: {modalSettings.cpu}</Label>
+                            <Slider
+                              value={[modalSettings.cpu]}
+                              onValueChange={([v]) => setModalSettings({ ...modalSettings, cpu: v })}
+                              min={0.25}
+                              max={8}
+                              step={0.25}
+                            />
+                            <p className="text-[11px] text-muted-foreground">CPU allocation per sandbox container (0.25–8 cores)</p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Memory: {modalSettings.memory} MB</Label>
+                            <Slider
+                              value={[modalSettings.memory]}
+                              onValueChange={([v]) => setModalSettings({ ...modalSettings, memory: v })}
+                              min={64}
+                              max={8192}
+                              step={64}
+                            />
+                            <p className="text-[11px] text-muted-foreground">RAM allocation per sandbox container (64–8192 MB)</p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Idle Timeout: {modalSettings.idleTimeout}s</Label>
+                            <Slider
+                              value={[modalSettings.idleTimeout]}
+                              onValueChange={([v]) => setModalSettings({ ...modalSettings, idleTimeout: v })}
+                              min={30}
+                              max={3600}
+                              step={30}
+                            />
+                            <p className="text-[11px] text-muted-foreground">Sandbox auto-stops after this many seconds of inactivity</p>
+                          </div>
+
+                          <Separator />
+
+                          <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                            <p className="text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">Tip:</span> You can also set <code className="text-[10px] bg-muted px-1 py-0.5 rounded">MODAL_TOKEN_ID</code> and{' '}
+                              <code className="text-[10px] bg-muted px-1 py-0.5 rounded">MODAL_TOKEN_SECRET</code> as environment variables{' '}
+                              in <code className="text-[10px] bg-muted px-1 py-0.5 rounded">~/.hermes/.env</code>.
+                              Environment variables take priority over UI settings.
+                            </p>
+                          </div>
+
+                          <div className="flex justify-end">
+                            <SaveButton section="modal" label="Save Modal Config" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </TabsContent>
 
               {/* ─── Memory Tab ─── */}

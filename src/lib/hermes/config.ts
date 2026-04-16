@@ -113,6 +113,15 @@ const DEFAULT_CONFIG: HermesConfig = {
   terminal: {
     backend: "local",
     timeout: 180,
+    modal: {
+      token_id: "",
+      token_secret: "",
+      app_name: "hermes-sandbox",
+      image: "ghcr.io/modal-labs/example-image",
+      cpu: 1,
+      memory: 512,
+      idle_timeout: 300,
+    },
   },
   browser: {
     inactivity_timeout: 120,

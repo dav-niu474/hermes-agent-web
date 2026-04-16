@@ -890,13 +890,43 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     const execAsync = promisify(execCmd);
     const pathMod = await import("path");
 
+    // Resolve terminal backend from config
+    let backend = "local";
+    try {
+      const config = loadConfig();
+      backend = String((config.terminal as Record<string, unknown>)?.backend || "local");
+    } catch { /* fall through to local */ }
+
     const configTimeout = (loadConfig().terminal?.timeout as number) || 180;
-    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || configTimeout)) * 1000;
+    const timeout = Math.min(300, Math.max(5, Number(args.timeout) || configTimeout));
+
+    // ── Modal backend ─────────────────────────────────────────────
+    if (backend === "modal") {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        const result = await modalSandbox.execute(command, timeout);
+        return JSON.stringify({
+          stdout: result.stdout,
+          stderr: result.stderr || undefined,
+          exitCode: result.exitCode,
+          workdir: "/sandbox",
+          backend: "modal",
+          timedOut: result.timedOut,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: `Modal sandbox error: ${err instanceof Error ? err.message : String(err)}`,
+          backend: "modal",
+        });
+      }
+    }
+
+    // ── Local backend (default) ───────────────────────────────────
     const workdir = process.env.HERMES_WORKSPACE || process.cwd();
 
     try {
       const { stdout, stderr } = await execAsync(command, {
-        timeout,
+        timeout: timeout * 1000,
         maxBuffer: 1024 * 1024,
         cwd: workdir,
       });
@@ -905,6 +935,7 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         stderr: stderr.trimEnd() || undefined,
         exitCode: 0,
         workdir,
+        backend: "local",
       });
     } catch (err: any) {
       return JSON.stringify({
@@ -912,6 +943,7 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         stderr: (err.stderr || err.message || "").trimEnd(),
         exitCode: err.code || 1,
         timedOut: err.killed === true,
+        backend: "local",
       });
     }
   }
