@@ -114,8 +114,8 @@ const DEFAULT_CONFIG: HermesConfig = {
     backend: "local",
     timeout: 180,
     modal: {
-      token_id: "",
-      token_secret: "",
+      token_id: "${MODAL_TOKEN_ID}",
+      token_secret: "${MODAL_TOKEN_SECRET}",
       app_name: "hermes-sandbox",
       image: "ghcr.io/modal-labs/example-image",
       cpu: 1,
