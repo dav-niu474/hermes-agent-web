@@ -129,3 +129,24 @@ Stage Summary:
 - Settings UI: Terminal tab now has working backend selector with Modal (Serverless) option
 - When "Modal (Serverless)" selected, a config card appears with: Token ID, Token Secret, App Name, Image, CPU, Memory, Idle Timeout
 - Backend dispatch: registered-tools.ts and chat/route.ts both check config.terminal.backend and route accordingly
+
+---
+Task ID: 1
+Agent: main
+Task: 配置 Modal Token 到 Vercel 环境变量作为沙箱默认值
+
+Work Log:
+- 检查项目状态：Modal 集成已在 commit 7a5c945 中存在
+- 确认 modal-sandbox.ts 已支持 process.env.MODAL_TOKEN_ID/SECRET 优先读取
+- 修改 config.ts DEFAULT_CONFIG: token_id/secret 从空字符串改为 ${MODAL_TOKEN_ID}/${MODAL_TOKEN_SECRET} 环境变量展开引用
+- 利用已有的 expandEnvVars() 函数在运行时自动解析
+- 创建 .env.local 本地开发文件（已在 .gitignore 中，不会提交）
+- commit fe51021 + push 到 origin/main
+
+Stage Summary:
+- Modal 沙箱 token 配置为环境变量展开引用，运行时由 expandEnvVars() 解析
+- Vercel 部署时需在 Vercel Dashboard → Settings → Environment Variables 中设置：
+  - MODAL_TOKEN_ID=ak-AiT6K7jajQ1rQSOgRW0Iza
+  - MODAL_TOKEN_SECRET=as-LrGT7sGy7Dw3mGSetpOdIc
+- 本地开发通过 .env.local 自动加载
+- modal-sandbox.ts 优先读 process.env，其次读 config.yaml，双重保障
