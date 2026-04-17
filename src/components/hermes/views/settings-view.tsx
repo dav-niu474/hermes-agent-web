@@ -845,13 +845,13 @@ export function SettingsView() {
                   </Card>
                 </motion.div>
 
-                {/* ─── Modal Sandbox Config (conditional) ─── */}
+                {/* ─── Modal Sandbox Config (always visible when tokens configured) ─── */}
                 <AnimatePresence>
-                  {terminalSettings.backend === 'modal' && (
+                  {modalSettings.tokenId && (
                     <motion.div
-                      initial={{ opacity: 0, y: 10, height: 0 }}
-                      animate={{ opacity: 1, y: 0, height: 'auto' }}
-                      exit={{ opacity: 0, y: 10, height: 0 }}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
                       transition={{ delay: 0.1 }}
                     >
                       <Card>
