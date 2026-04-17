@@ -11,11 +11,22 @@ export async function GET() {
     const config = loadConfig(true); // force fresh read
     const llmConfig = getLLMConfig();
 
+    // Inject Modal env vars into terminal.modal if not already set
+    const terminal = { ...(config.terminal as Record<string, unknown>) };
+    const modal = { ...(terminal.modal as Record<string, unknown> | undefined) };
+    if (process.env.MODAL_TOKEN_ID && !(modal.token_id as string)?.trim()) {
+      modal.token_id = process.env.MODAL_TOKEN_ID;
+    }
+    if (process.env.MODAL_TOKEN_SECRET && !(modal.token_secret as string)?.trim()) {
+      modal.token_secret = process.env.MODAL_TOKEN_SECRET;
+    }
+    terminal.modal = modal;
+
     return NextResponse.json({
       // Full raw config sections
       model: config.model,
       agent: config.agent,
-      terminal: config.terminal,
+      terminal,
       browser: config.browser,
       memory: config.memory,
       display: config.display,
@@ -71,12 +82,23 @@ export async function PUT(request: NextRequest) {
     const freshConfig = loadConfig(true);
     const llmConfig = getLLMConfig();
 
+    // Inject Modal env vars into terminal.modal if not already set
+    const freshTerminal = { ...(freshConfig.terminal as Record<string, unknown>) };
+    const freshModal = { ...(freshTerminal.modal as Record<string, unknown> | undefined) };
+    if (process.env.MODAL_TOKEN_ID && !(freshModal.token_id as string)?.trim()) {
+      freshModal.token_id = process.env.MODAL_TOKEN_ID;
+    }
+    if (process.env.MODAL_TOKEN_SECRET && !(freshModal.token_secret as string)?.trim()) {
+      freshModal.token_secret = process.env.MODAL_TOKEN_SECRET;
+    }
+    freshTerminal.modal = freshModal;
+
     return NextResponse.json({
       success: true,
       config: {
         model: freshConfig.model,
         agent: freshConfig.agent,
-        terminal: freshConfig.terminal,
+        terminal: freshTerminal,
         browser: freshConfig.browser,
         memory: freshConfig.memory,
         display: freshConfig.display,
