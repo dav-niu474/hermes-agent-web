@@ -31,6 +31,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Terminal,
+  Cloud,
   X,
   Zap,
   Volume2,
@@ -963,6 +964,8 @@ export function ChatView() {
     clearMessages,
     selectedModel,
     setSelectedModel,
+    terminalBackend,
+    setTerminalBackend,
   } = useAppStore();
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -1176,6 +1179,7 @@ export function ChatView() {
           stream: true,
           model: effectiveModel,
           provider: effectiveProvider,
+          terminalBackend,
         }),
       });
 
@@ -1360,6 +1364,27 @@ export function ChatView() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => setTerminalBackend(terminalBackend === 'local' ? 'modal' : 'local')}
+                  disabled={isStreaming}
+                >
+                  {terminalBackend === 'modal' ? (
+                    <Cloud className="size-4 text-violet-500" />
+                  ) : (
+                    <Terminal className="size-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                <p>Terminal: <span className="font-medium">{terminalBackend === 'modal' ? 'Modal Sandbox' : 'Local'}</span></p>
+                <p className="text-muted-foreground">Click to switch</p>
+              </TooltipContent>
+            </Tooltip>
             <ModelSelector
               selectedModel={selectedModel || DEFAULT_MODEL}
               onSelectModel={handleModelSelect}

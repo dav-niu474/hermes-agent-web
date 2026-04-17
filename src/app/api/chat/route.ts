@@ -36,6 +36,8 @@ interface ChatRequest {
   stream?: boolean;
   model?: string;
   provider?: string;
+  /** Override terminal backend: 'local' or 'modal' */
+  terminalBackend?: string;
 }
 
 /** Generate a simple fallback title from the first user message. */
@@ -160,10 +162,13 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
   private activatedSkills: Map<string, string> = new Map();
   /** Session-scoped todo state — sessionId → task list */
   private todoStore = new Map<string, Array<{id: string; content: string; status: string}>>();
+  /** Override terminal backend from request */
+  private terminalBackendOverride: string | null;
 
-  constructor(toolNames: string[]) {
+  constructor(toolNames: string[], terminalBackendOverride?: string) {
     // Only include tools that are actually executable in the web context
     this.toolNames = new Set(toolNames.filter((n) => WEB_COMPATIBLE_TOOLS.has(n)));
+    this.terminalBackendOverride = terminalBackendOverride || null;
     this.toolSchemas = ALL_TOOLS
       .filter((t) => this.toolNames.has(t.name))
       .map((t) => ({
@@ -890,11 +895,15 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     const execAsync = promisify(execCmd);
     const pathMod = await import("path");
 
-    // Resolve terminal backend from config
+    // Resolve terminal backend: request override > config
     let backend = "local";
     try {
-      const config = loadConfig();
-      backend = String((config.terminal as Record<string, unknown>)?.backend || "local");
+      if (this.terminalBackendOverride) {
+        backend = this.terminalBackendOverride;
+      } else {
+        const config = loadConfig();
+        backend = String((config.terminal as Record<string, unknown>)?.backend || "local");
+      }
     } catch { /* fall through to local */ }
 
     const configTimeout = (loadConfig().terminal?.timeout as number) || 180;
@@ -1455,7 +1464,7 @@ export async function POST(request: NextRequest) {
 
     // ── Build components ──
     const config = loadConfig();
-    const toolRegistry = new ToolRegistryAdapter(toolNames);
+    const toolRegistry = new ToolRegistryAdapter(toolNames, body.terminalBackend);
 
     // Memory: read config for char limits and enabled state
     const memCfg = config.memory ?? {};

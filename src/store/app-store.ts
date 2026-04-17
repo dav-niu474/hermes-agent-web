@@ -80,6 +80,10 @@ interface AppState {
 
   settings: Record<string, string>;
   updateSetting: (key: string, value: string) => void;
+
+  /** Terminal backend mode: 'local' = host subprocess, 'modal' = Modal gVisor sandbox */
+  terminalBackend: 'local' | 'modal';
+  setTerminalBackend: (backend: 'local' | 'modal') => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -206,4 +210,7 @@ export const useAppStore = create<AppState>((set) => ({
   settings: {},
   updateSetting: (key, value) =>
     set((s) => ({ settings: { ...s.settings, [key]: value } })),
+
+  terminalBackend: 'local',
+  setTerminalBackend: (backend) => set({ terminalBackend: backend }),
 }));
