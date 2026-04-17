@@ -50,8 +50,24 @@ test
 prompt
 
 server.log
-# Skills directory
-/skills/
+# Skills directory (nuwa perspective skills are tracked)
+/skills/*
+!/skills/roundtable-discussion/
+!/skills/nuwa-skill/
+!/skills/feynman-perspective/
+!/skills/elon-musk-perspective/
+!/skills/munger-perspective/
+!/skills/naval-perspective/
+!/skills/steve-jobs-perspective/
+!/skills/taleb-perspective/
+!/skills/andrej-karpathy-perspective/
+!/skills/ilya-sutskever-perspective/
+!/skills/paul-graham-perspective/
+!/skills/zhang-yiming-perspective/
+!/skills/zhangxuefeng-perspective/
+!/skills/mrbeast-perspective/
+!/skills/trump-perspective/
+!/skills/sun-yuchen-perspective/
 
 # Database files
 *.db

@@ -21,7 +21,6 @@ import {
   MoreHorizontal,
   Trash2,
   Loader2,
-  Users,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAppStore, type SidebarView, type ThemeStyle } from '@/store/app-store';
@@ -69,7 +68,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'chat', label: 'Chat', icon: MessageSquare, emoji: '💬' },
-  { id: 'roundtable', label: 'Roundtable', icon: Users, emoji: '🎯' },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, emoji: '📊' },
   { id: 'tools', label: 'Tools', icon: Wrench, emoji: '🔧' },
   { id: 'skills', label: 'Skills', icon: Zap, emoji: '⚡' },
