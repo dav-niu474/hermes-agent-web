@@ -313,7 +313,7 @@ function SkillContentDialog({
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -322,7 +322,7 @@ function SkillContentDialog({
               </span>
             </div>
           ) : (
-            <ScrollArea className="h-full max-h-[50vh]">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-4">
                 {frontmatter && (
                   <div>
