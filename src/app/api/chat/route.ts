@@ -1487,6 +1487,24 @@ export async function POST(request: NextRequest) {
       console.warn("[Chat API] Failed to build skills prompt:", err);
     }
 
+    // ── Terminal backend environment hint ──
+    const resolvedTerminalBackend = body.terminalBackend
+      || String((config.terminal as Record<string, unknown>)?.backend || "local");
+    const isModal = resolvedTerminalBackend === "modal";
+    const terminalEnvHint = isModal
+      ? "# Execution environment\n" +
+        "You are running in a **Modal cloud sandbox** (gVisor isolated container, Debian-based, Python 3.11).\n" +
+        "Working directory: `/sandbox`. Filesystem persists within this sandbox session.\n" +
+        "Pre-installed tools: git, curl, wget, jq, zip, unzip, tree, python3, pip.\n" +
+        "Use `git clone <url>` to clone repositories, then `cd` into them and analyze files.\n" +
+        "Install additional packages with `apt-get install -y <pkg>` or `pip install <pkg>`.\n" +
+        "Note: The sandbox may be recreated between turns — avoid relying on background processes."
+      : "# Execution environment\n" +
+        "You are running on a **local machine** with direct shell access.\n" +
+        "Working directory: the project workspace. All standard Unix tools are available.\n" +
+        "Use `git clone <url>` to clone repositories, then `cd` into them and analyze files.\n" +
+        "Standard development tools (gcc, python3, node, etc.) may be available.";
+
     // ── Agent config ──
     const personality = (config.display as Record<string, unknown>)?.personality as string | undefined;
     const agentConfig: AgentConfig = {
@@ -1499,6 +1517,7 @@ export async function POST(request: NextRequest) {
       sessionId: localSessionId,
       skillsPrompt,
       personality,
+      systemPrompt: terminalEnvHint,
     };
 
     const agentLoop = new AgentLoop(agentConfig, toolRegistry, memoryAdapter);

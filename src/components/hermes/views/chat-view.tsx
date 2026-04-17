@@ -1367,22 +1367,32 @@ export function ChatView() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8"
+                  variant="outline"
+                  size="sm"
+                  className={`h-7 gap-1.5 px-2.5 text-xs font-medium transition-all ${
+                    terminalBackend === 'modal'
+                      ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
                   onClick={() => setTerminalBackend(terminalBackend === 'local' ? 'modal' : 'local')}
                   disabled={isStreaming}
                 >
                   {terminalBackend === 'modal' ? (
-                    <Cloud className="size-4 text-violet-500" />
+                    <>
+                      <Cloud className="size-3.5" />
+                      <span className="hidden sm:inline">Cloud Sandbox</span>
+                    </>
                   ) : (
-                    <Terminal className="size-4" />
+                    <>
+                      <Terminal className="size-3.5" />
+                      <span className="hidden sm:inline">Local</span>
+                    </>
                   )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                <p>Terminal: <span className="font-medium">{terminalBackend === 'modal' ? 'Modal Sandbox' : 'Local'}</span></p>
-                <p className="text-muted-foreground">Click to switch</p>
+                <p>Terminal: <span className="font-medium">{terminalBackend === 'modal' ? 'Modal Cloud Sandbox' : 'Local Machine'}</span></p>
+                <p className="text-muted-foreground">Click to switch execution environment</p>
               </TooltipContent>
             </Tooltip>
             <ModelSelector

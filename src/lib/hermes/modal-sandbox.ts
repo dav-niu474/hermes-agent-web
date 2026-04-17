@@ -16,7 +16,7 @@ export interface ModalSandboxConfig {
   tokenId: string;
   /** Modal Token Secret */
   tokenSecret: string;
-  /** Container image (default: "ghcr.io/modal-labs/example-image") */
+  /** Container image (default: "python:3.11-slim") */
   image: string;
   /** CPU cores (0.25–8, default: 1) */
   cpu: number;
@@ -26,6 +26,8 @@ export interface ModalSandboxConfig {
   idleTimeout: number;
   /** App name in Modal (default: "hermes-sandbox") */
   appName: string;
+  /** Shell command to run after sandbox creation for provisioning (default: install git, curl, etc.) */
+  setupCommand: string;
 }
 
 interface SandboxState {
@@ -39,6 +41,8 @@ interface SandboxState {
   idleTimer: ReturnType<typeof setTimeout> | null;
   /** Execution counter for this sandbox */
   execCount: number;
+  /** Whether the sandbox has been provisioned (setupCommand executed) */
+  provisioned: boolean;
 }
 
 interface ExecResult {
@@ -57,6 +61,7 @@ class ModalSandboxManager {
     lastActivity: Date.now(),
     idleTimer: null,
     execCount: 0,
+    provisioned: false,
   };
 
   private config: ModalSandboxConfig | null = null;
@@ -88,11 +93,12 @@ class ModalSandboxManager {
     return {
       tokenId: resolvedTokenId,
       tokenSecret: resolvedTokenSecret,
-      image: (modalCfg?.image as string) || 'ghcr.io/modal-labs/example-image',
+      image: (modalCfg?.image as string) || 'python:3.11-slim',
       cpu: Math.min(8, Math.max(0.25, Number(modalCfg?.cpu) || 1)),
       memory: Math.min(8192, Math.max(64, Number(modalCfg?.memory) || 512)),
       idleTimeout: Math.min(3600, Math.max(30, Number(modalCfg?.idle_timeout) || 300)),
       appName: (modalCfg?.app_name as string) || 'hermes-sandbox',
+      setupCommand: (modalCfg?.setup_command as string) || 'apt-get update -qq && apt-get install -y -qq git curl wget jq zip unzip tree 2>/dev/null || pip install --quiet httpx 2>/dev/null; echo "Setup complete"',
     };
   }
 
@@ -167,13 +173,37 @@ class ModalSandboxManager {
       this.state.sandboxId = sandboxId;
       this.state.execCount = 0;
       this.state.lastActivity = Date.now();
+      this.state.provisioned = false;
       this.resetIdleTimer();
 
       console.log(`[ModalSandbox] Sandbox created: ${sandboxId}`);
+
+      // Run setup/provisioning command on fresh sandbox
+      await this.provisionSandbox(sandboxId);
+
       return sandboxId;
     } catch (err) {
       console.error('[ModalSandbox] Failed to create sandbox:', err);
       return null;
+    }
+  }
+
+  /**
+   * Run setup command to provision the sandbox with common dev tools.
+   * Only runs once per sandbox instance.
+   */
+  private async provisionSandbox(sandboxId: string): Promise<void> {
+    if (this.state.provisioned || !this.config?.setupCommand) return;
+
+    try {
+      console.log('[ModalSandbox] Running provisioning setup command...');
+      await this.modalClient.interactive.exec(sandboxId, this.config.setupCommand, { timeout: 120000 });
+      this.state.provisioned = true;
+      console.log('[ModalSandbox] Provisioning complete');
+    } catch (err) {
+      // Provisioning failure is non-fatal — log but continue
+      console.warn('[ModalSandbox] Provisioning failed (non-fatal):', err);
+      this.state.provisioned = true; // Don't retry
     }
   }
 
@@ -213,6 +243,7 @@ class ModalSandboxManager {
 
     this.state.sandboxId = null;
     this.state.execCount = 0;
+    this.state.provisioned = false;
   }
 
   // ── Command execution ──────────────────────────────────────────────

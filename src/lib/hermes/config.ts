@@ -117,7 +117,7 @@ const DEFAULT_CONFIG: HermesConfig = {
       token_id: "${MODAL_TOKEN_ID}",
       token_secret: "${MODAL_TOKEN_SECRET}",
       app_name: "hermes-sandbox",
-      image: "ghcr.io/modal-labs/example-image",
+      image: "python:3.11-slim",
       cpu: 1,
       memory: 512,
       idle_timeout: 300,
