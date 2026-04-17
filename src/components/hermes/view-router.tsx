@@ -10,6 +10,7 @@ import { SessionsView } from './views/sessions-view';
 import { MemoryView } from './views/memory-view';
 import { SettingsView } from './views/settings-view';
 import { CronjobsView } from './views/cronjobs-view';
+import { RoundtableView } from './views/roundtable-view';
 
 const viewComponents: Record<string, React.ComponentType> = {
   chat: ChatView,
@@ -20,6 +21,7 @@ const viewComponents: Record<string, React.ComponentType> = {
   memory: MemoryView,
   settings: SettingsView,
   cronjobs: CronjobsView,
+  roundtable: RoundtableView,
 };
 
 /** Smooth page transition animation */

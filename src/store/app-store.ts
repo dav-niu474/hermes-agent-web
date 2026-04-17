@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type ThemeStyle = 'default' | 'emerald' | 'rose' | 'ocean';
-export type SidebarView = 'chat' | 'dashboard' | 'tools' | 'skills' | 'sessions' | 'memory' | 'settings' | 'cronjobs';
+export type SidebarView = 'chat' | 'dashboard' | 'tools' | 'skills' | 'sessions' | 'memory' | 'settings' | 'cronjobs' | 'roundtable';
 
 /** A tracked tool call within an assistant message. */
 export interface ToolCallEntry {
