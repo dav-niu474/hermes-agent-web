@@ -59,7 +59,7 @@ export function ViewRouter() {
         initial="initial"
         animate="animate"
         exit="exit"
-        className="h-full w-full"
+        className="h-full w-full min-h-0"
       >
         <ViewComponent />
       </motion.div>
