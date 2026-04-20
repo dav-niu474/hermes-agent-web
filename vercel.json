@@ -2,5 +2,13 @@
   "framework": "nextjs",
   "buildCommand": "bunx prisma generate && bunx prisma db push --skip-generate --accept-data-loss && next build",
   "installCommand": "bun install --no-save",
-  "regions": ["hkg1"]
+  "regions": ["hkg1"],
+  "functions": {
+    "src/app/api/benchmark/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/chat/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }
