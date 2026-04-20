@@ -26,6 +26,8 @@ import {
   Loader2,
   RefreshCw,
   PieChart,
+  Gauge,
+  Play,
   Bot,
   Hammer,
   DollarSign,
@@ -1293,6 +1295,200 @@ function RecentSessionsTable({ sessions, loading, onRefresh }: { sessions: ApiSt
 }
 
 /* ═══════════════════════════════════════════
+   MODEL BENCHMARK CARD
+   ═══════════════════════════════════════════ */
+
+interface BenchmarkResult {
+  model: string;
+  status: 'ok' | 'error';
+  latencyMs: number;
+  ttfbMs: number | null;
+  totalTokens: number | null;
+  response: string;
+  error?: string;
+}
+
+const BENCHMARK_MODELS = [
+  { id: 'z-ai/glm-5.1', label: 'GLM 5.1' },
+  { id: 'z-ai/glm5', label: 'GLM 5' },
+  { id: 'z-ai/glm4.7', label: 'GLM 4.7' },
+  { id: 'minimaxai/minimax-m2.7', label: 'MiniMax M2.7' },
+  { id: 'minimaxai/minimax-m2.5', label: 'MiniMax M2.5' },
+];
+
+function ModelBenchmarkCard() {
+  const [results, setResults] = useState<BenchmarkResult[]>([]);
+  const [testing, setTesting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const setCurrentView = useAppStore((s) => s.setCurrentView);
+
+  const runBenchmark = useCallback(async () => {
+    setTesting(true);
+    setResults([]);
+    setErrorMsg(null);
+    try {
+      const resp = await fetch('/api/benchmark', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ models: BENCHMARK_MODELS.map(m => m.id) }),
+      });
+      const data = await resp.json();
+      if (data.results) {
+        setResults(data.results);
+      } else if (data.error) {
+        setErrorMsg(data.error);
+      }
+    } catch (e) {
+      setResults([{ model: '-', status: 'error', latencyMs: 0, ttfbMs: null, totalTokens: null, response: '', error: String(e) }]);
+    } finally {
+      setTesting(false);
+    }
+  }, []);
+
+  const okCount = results.filter(r => r.status === 'ok').length;
+  const avgLatency = results.length && okCount
+    ? Math.round(results.filter(r => r.status === 'ok').reduce((s, r) => s + r.latencyMs, 0) / okCount)
+    : 0;
+
+  return (
+    <motion.div variants={itemVariants}>
+      <Card className="hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Gauge className="w-4 h-4 text-chart-4" />
+                Model Benchmark
+              </CardTitle>
+              <CardDescription className="mt-1">Test NVIDIA NIM model response speed</CardDescription>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={runBenchmark}
+              disabled={testing}
+            >
+              {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              {testing ? 'Testing...' : 'Run Test'}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {results.length === 0 && !testing && !errorMsg && (
+            <div className="text-center text-muted-foreground text-sm py-6">
+              <Gauge className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              Click "Run Test" to benchmark NVIDIA NIM models
+            </div>
+          )}
+          {errorMsg && results.length === 0 && !testing && (
+            <div className="text-center text-sm py-4">
+              <div className="flex items-center justify-center gap-2 text-amber-600 mb-2">
+                <AlertTriangle className="w-4 h-4" />
+                <span className="font-medium">API Key Required</span>
+              </div>
+              <p className="text-muted-foreground mb-3 text-xs">
+                NVIDIA_API_KEY not configured. Go to Settings → API Keys to add your key.
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setCurrentView('settings')}>
+                <Settings className="w-3.5 h-3.5 mr-1.5" />
+                Open Settings
+              </Button>
+            </div>
+          )}
+          {testing && results.length === 0 && (
+            <div className="text-center text-muted-foreground text-sm py-6">
+              <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin" />
+              Sending requests to NVIDIA NIM...
+            </div>
+          )}
+          {results.length > 0 && (
+            <>
+              {/* Summary bar */}
+              <div className="flex items-center gap-4 mb-4 text-sm">
+                <Badge variant={okCount === results.length ? 'default' : 'secondary'}>
+                  {okCount}/{results.length} passed
+                </Badge>
+                {avgLatency > 0 && (
+                  <span className="text-muted-foreground">
+                    Avg: <span className="font-medium text-foreground">{avgLatency}ms</span>
+                  </span>
+                )}
+                <button
+                  className="text-muted-foreground hover:text-foreground ml-auto text-xs"
+                  onClick={() => setExpanded(!expanded)}
+                >
+                  {expanded ? '▲ Less' : '▼ Details'}
+                </button>
+              </div>
+              {/* Results table */}
+              <div className="space-y-2">
+                {results.map((r) => (
+                  <div
+                    key={r.model}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
+                      r.status === 'ok' ? 'bg-emerald-500/5' : 'bg-destructive/5'
+                    )}
+                  >
+                    <span className={cn(
+                      'w-2 h-2 rounded-full flex-shrink-0',
+                      r.status === 'ok' ? 'bg-emerald-500' : 'bg-destructive'
+                    )} />
+                    <span className="font-medium truncate flex-1 min-w-0" title={r.model}>
+                      {r.model}
+                    </span>
+                    {r.status === 'ok' ? (
+                      <>
+                        <span className="text-muted-foreground tabular-nums">
+                          {r.latencyMs}ms
+                        </span>
+                        {r.totalTokens != null && (
+                          <span className="text-xs text-muted-foreground hidden sm:inline">
+                            {r.totalTokens} tok
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs text-destructive truncate max-w-[200px]" title={r.error}>
+                        {r.error}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Expanded details */}
+              <AnimatePresence>
+                {expanded && results.filter(r => r.status === 'ok').length > 0 && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-3 pt-3 border-t space-y-1.5">
+                      {results.filter(r => r.status === 'ok').map((r) => (
+                        <div key={r.model} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{r.model}</span>
+                          <span className="tabular-nums">
+                            TTFB {r.ttfbMs}ms → Total {r.latencyMs}ms
+                            {r.response && <span className="ml-2 text-foreground/60">"{r.response}"</span>}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    QUICK ACTIONS
    ═══════════════════════════════════════════ */
 
@@ -1593,6 +1789,9 @@ export function DashboardView() {
             loading={insightsLoading}
           />
         </div>
+
+        {/* ─── Model Benchmark ─── */}
+        <ModelBenchmarkCard />
 
         {/* ─── System Resources ─── */}
         <SystemResourcesCard />

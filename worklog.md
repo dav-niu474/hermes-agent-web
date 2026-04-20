@@ -173,3 +173,30 @@ Stage Summary:
 - NVIDIA NIM 模型数量从 18 增加到 21 个（新增 GLM-5.1, MiniMax M2.7, MiniMax M2.5）
 - 总模型数量从 49 增加到 52 个
 - 用户提到的 "minimax m4.7" 模型不存在，MiniMax 最新为 M2.7（2026年4月发布）
+---
+Task ID: 7
+Agent: main
+Task: 测试新添加的 GLM 和 MiniMax 模型 API 响应速度
+
+Work Log:
+- 确认 NVIDIA NIM API 网络可达（curl 测试通过）
+- 通过 /v1/models 端点确认所有 5 个目标模型均在 NVIDIA 目录中：
+  - z-ai/glm-5.1 ✅
+  - z-ai/glm5 ✅  
+  - z-ai/glm4.7 ✅
+  - minimaxai/minimax-m2.7 ✅
+  - minimaxai/minimax-m2.5 ✅
+- 发现 NVIDIA_API_KEY 未在沙箱环境中配置（无 env var、无 config.yaml、无 .env.local）
+- 创建 /api/benchmark API 路由：支持对任意 NVIDIA NIM 模型进行测速
+- 在 Dashboard 视图中添加 ModelBenchmarkCard 组件：
+  - 一键测试 5 个新增模型
+  - 显示 TTFB、总延迟、token 数
+  - 支持展开详情查看每个模型
+  - 未配置 API Key 时显示引导用户到 Settings 的提示
+- ESLint 通过，无新增错误
+
+Stage Summary:
+- 创建了 /api/benchmark API 路由用于模型测速
+- Dashboard 新增 Model Benchmark 卡片
+- NVIDIA NIM 网络连通性已验证
+- ⚠️ 需要用户在 Settings 中配置 NVIDIA_API_KEY 才能进行实际测速
