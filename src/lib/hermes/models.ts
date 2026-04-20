@@ -110,7 +110,7 @@ const MODELS: ModelDef[] = [
 export const ALL_MODELS = MODELS;
 
 /** Default model for new conversations */
-export const DEFAULT_MODEL = "meta/llama-3.3-70b-instruct";
+export const DEFAULT_MODEL = "glm-4-flash";
 
 /** MODEL_PROVIDER_MAP: model-id → provider slug (used by backend config.ts) */
 export const MODEL_PROVIDER_MAP: Record<string, string> = Object.fromEntries(

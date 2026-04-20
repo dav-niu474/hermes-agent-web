@@ -405,11 +405,18 @@ export function updateConfig(updates: Record<string, unknown>): HermesConfig {
 // ─── Provider Detection ─────────────────────────────────────────────────────
 
 /**
- * Detect available providers from environment variables.
- * Returns an array of provider slugs that have API keys set.
+ * Detect available providers from environment variables AND config files.
+ * Returns an array of provider slugs that have API keys/config available.
+ *
+ * Detection order:
+ *   1. Environment variables (NVIDIA_API_KEY, GLM_API_KEY, etc.)
+ *   2. .z-ai-config file (project root, home dir, /etc)
+ *   3. config.yaml model.provider + model.api_key
  */
 export function detectAvailableProviders(): string[] {
   const available: string[] = [];
+
+  // 1. Check environment variables
   for (const envVar of PROVIDER_AUTO_ORDER) {
     const val = process.env[envVar];
     if (val && val.trim()) {
@@ -419,6 +426,48 @@ export function detectAvailableProviders(): string[] {
       }
     }
   }
+
+  // 2. Check .z-ai-config file existence (used by z-ai-web-dev-sdk)
+  if (!available.includes("glm")) {
+    try {
+      const zaiConfigPaths = [
+        join(process.cwd(), ".z-ai-config"),
+        join(homedir(), ".z-ai-config"),
+        "/etc/.z-ai-config",
+      ];
+      for (const cfgPath of zaiConfigPaths) {
+        try {
+          existsSync(cfgPath);
+          available.push("glm");
+          break;
+        } catch {
+          // not found, continue
+        }
+      }
+    } catch {
+      // fs not available (serverless), skip
+    }
+  }
+
+  // 3. Check config.yaml for model.api_key
+  if (available.length === 0) {
+    try {
+      const config = loadConfig();
+      const modelCfg = config.model as ModelConfig;
+      if (modelCfg?.api_key?.trim()) {
+        const provider = modelCfg.provider?.trim();
+        if (provider && provider !== "auto") {
+          available.push(provider.toLowerCase());
+        } else {
+          // No explicit provider, assume it's valid
+          available.push("glm");
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return available;
 }
 
@@ -430,7 +479,7 @@ export function detectAvailableProviders(): string[] {
  *   2. Config file model.provider
  *   3. HERMES_INFERENCE_PROVIDER env var
  *   4. Auto-detect from available API keys
- *   5. Fall back to "nvidia"
+ *   5. Fall back to "glm" (ZhipuAI — most likely to have config)
  */
 export function resolveProvider(override?: string): string {
   // 1. Explicit override
@@ -457,17 +506,17 @@ export function resolveProvider(override?: string): string {
     return available[0];
   }
 
-  // 5. Default to nvidia
-  return "nvidia";
+  // 5. Default to glm (ZhipuAI — most common provider for this platform)
+  return "glm";
 }
 
 /**
  * Resolve the API key for a given provider.
  *
- * Checks provider-specific env vars first, then falls back to OPENAI_API_KEY.
+ * Checks provider-specific env vars first, then config.yaml, then .z-ai-config file.
  */
 export function resolveApiKey(provider: string): string {
-  // Check provider-specific keys first
+  // Check provider-specific env vars first
   for (const [envVar, info] of Object.entries(PROVIDER_ENV_MAP)) {
     if (info.provider === provider) {
       const val = process.env[envVar];
@@ -475,15 +524,53 @@ export function resolveApiKey(provider: string): string {
     }
   }
 
-  // Aliases
+  // Aliases for env vars
   if (provider === "glm" || provider === "zai") {
-    return process.env.GLM_API_KEY?.trim() || process.env.ZAI_API_KEY?.trim() || process.env.Z_AI_API_KEY?.trim() || "";
+    const envKey = process.env.GLM_API_KEY?.trim() || process.env.ZAI_API_KEY?.trim() || process.env.Z_AI_API_KEY?.trim();
+    if (envKey) return envKey;
   }
   if (provider === "google" || provider === "gemini") {
-    return process.env.GOOGLE_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || "";
+    const envKey = process.env.GOOGLE_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+    if (envKey) return envKey;
   }
   if (provider === "anthropic") {
-    return process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_TOKEN?.trim() || "";
+    const envKey = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_TOKEN?.trim();
+    if (envKey) return envKey;
+  }
+
+  // Fallback: check config.yaml model.api_key
+  try {
+    const config = loadConfig();
+    const modelCfg = config.model as ModelConfig;
+    if (modelCfg?.api_key?.trim()) {
+      return modelCfg.api_key.trim();
+    }
+  } catch {
+    // ignore
+  }
+
+  // Fallback: check .z-ai-config file for GLM/ZAI provider
+  if (provider === "glm" || provider === "zai") {
+    try {
+      const zaiConfigPaths = [
+        join(process.cwd(), ".z-ai-config"),
+        join(homedir(), ".z-ai-config"),
+        "/etc/.z-ai-config",
+      ];
+      for (const cfgPath of zaiConfigPaths) {
+        try {
+          const raw = safeReadFileSync(cfgPath, "utf-8");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.apiKey) return String(parsed.apiKey);
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   // Generic fallback
@@ -492,6 +579,7 @@ export function resolveApiKey(provider: string): string {
 
 /**
  * Resolve the base URL for a given provider.
+ * Checks config.yaml, .z-ai-config file, and provider defaults.
  */
 export function resolveBaseUrl(provider: string): string {
   // Check config.yaml model.base_url first
@@ -515,8 +603,33 @@ export function resolveBaseUrl(provider: string): string {
     case "gemini":
       return process.env.GEMINI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com/v1beta/openai";
     case "glm":
-    case "zai":
-      return process.env.GLM_BASE_URL?.trim() || "https://open.bigmodel.cn/api/paas/v4";
+    case "zai": {
+      // Check env var first
+      const envUrl = process.env.GLM_BASE_URL?.trim();
+      if (envUrl) return envUrl;
+      // Check .z-ai-config file
+      try {
+        const zaiConfigPaths = [
+          join(process.cwd(), ".z-ai-config"),
+          join(homedir(), ".z-ai-config"),
+          "/etc/.z-ai-config",
+        ];
+        for (const cfgPath of zaiConfigPaths) {
+          try {
+            const raw = safeReadFileSync(cfgPath, "utf-8");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed.baseUrl) return String(parsed.baseUrl).replace(/\/+$/, "");
+            }
+          } catch {
+            continue;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return "https://open.bigmodel.cn/api/paas/v4";
+    }
     default:
       return "";
   }
