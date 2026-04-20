@@ -45,8 +45,11 @@ const MODELS: ModelDef[] = [
   { id: "deepseek-ai/deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill 70B",  provider: "nvidia",     group: "NVIDIA NIM",          desc: "DeepSeek R1 distilled to Llama 70B", tags: ["reasoning"] },
   { id: "qwen/qwen2.5-72b-instruct",              name: "Qwen 2.5 72B",                 provider: "nvidia",     group: "NVIDIA NIM",          desc: "Alibaba Qwen 2.5 72B Instruct" },
   { id: "qwen/qwq-32b",                           name: "QwQ 32B",                      provider: "nvidia",     group: "NVIDIA NIM",          desc: "Alibaba QwQ 32B reasoning model", tags: ["reasoning"] },
-  { id: "z-ai/glm4.7",                            name: "GLM 4.7 (NIM)",                provider: "nvidia",     group: "NVIDIA NIM",          desc: "ZhipuAI GLM 4.7 reasoning model", tags: ["reasoning"] },
-  { id: "z-ai/glm5",                              name: "GLM 5 (NIM)",                  provider: "nvidia",     group: "NVIDIA NIM",          desc: "ZhipuAI GLM 5" },
+  { id: "z-ai/glm4.7",                            name: "GLM 4.7 (NIM)",                provider: "nvidia",     group: "NVIDIA NIM",          desc: "ZhipuAI GLM 4.7 coding & reasoning model", tags: ["reasoning"] },
+  { id: "z-ai/glm5",                              name: "GLM 5 (NIM)",                  provider: "nvidia",     group: "NVIDIA NIM",          desc: "ZhipuAI GLM 5 744B MoE" },
+  { id: "z-ai/glm-5.1",                           name: "GLM 5.1 (NIM)",                provider: "nvidia",     group: "NVIDIA NIM",          desc: "ZhipuAI GLM-5.1 flagship agentic coding model", tags: ["reasoning"] },
+  { id: "minimaxai/minimax-m2.7",                 name: "MiniMax M2.7",                  provider: "nvidia",     group: "NVIDIA NIM",          desc: "MiniMax M2.7 230B MoE agentic model" },
+  { id: "minimaxai/minimax-m2.5",                 name: "MiniMax M2.5",                  provider: "nvidia",     group: "NVIDIA NIM",          desc: "MiniMax M2.5 230B MoE coding & reasoning model" },
 
   // ── OpenAI ──────────────────────────────────────────────
   { id: "gpt-4o",                                  name: "GPT-4o",                       provider: "openai",     group: "OpenAI",              desc: "OpenAI GPT-4o multimodal" },

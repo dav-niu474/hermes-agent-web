@@ -150,3 +150,26 @@ Stage Summary:
   - MODAL_TOKEN_SECRET=as-LrGT7sGy7Dw3mGSetpOdIc
 - 本地开发通过 .env.local 自动加载
 - modal-sandbox.ts 优先读 process.env，其次读 config.yaml，双重保障
+---
+Task ID: 6
+Agent: main
+Task: 添加 NVIDIA NIM 上的 GLM 和 MiniMax 模型到模型选择中
+
+Work Log:
+- 通过 web_search 搜索 NVIDIA NIM (build.nvidia.com) 上所有 GLM 和 MiniMax 模型
+- 通过 page_reader 读取 NVIDIA 模型卡片页面，确认 API 模型 ID
+- 确认 NVIDIA NIM 上的模型列表：
+  - Z-AI GLM: glm-5.1 (新), glm5 (已有), glm4_7 (已有为 glm4.7)
+  - MiniMax: minimax-m2.7, minimax-m2.5
+- 用户提到的 "minimax m4.7" 不存在，MiniMax 最新为 M2.7
+- 修改 src/lib/hermes/models.ts，新增 3 个模型：
+  - z-ai/glm-5.1 (GLM 5.1 NIM) — ZhipuAI GLM-5.1 flagship agentic coding model
+  - minimaxai/minimax-m2.7 (MiniMax M2.7) — 230B MoE agentic model
+  - minimaxai/minimax-m2.5 (MiniMax M2.5) — 230B MoE coding & reasoning model
+- 同时优化了已有 GLM 模型的描述文本
+- ESLint 通过，无新增错误
+
+Stage Summary:
+- NVIDIA NIM 模型数量从 18 增加到 21 个（新增 GLM-5.1, MiniMax M2.7, MiniMax M2.5）
+- 总模型数量从 49 增加到 52 个
+- 用户提到的 "minimax m4.7" 模型不存在，MiniMax 最新为 M2.7（2026年4月发布）
