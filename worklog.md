@@ -229,3 +229,30 @@ Stage Summary:
 - 新增 /api/sandbox 端点用于健康检查和命令执行测试
 - Vercel 部署时，只要配置了 MODAL_TOKEN_ID 和 MODAL_TOKEN_SECRET，所有工具自动切换到 Modal 沙箱
 - 需要 Vercel 环境变量：MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+---
+Task ID: 9
+Agent: main
+Task: 修复代码问题并验证部署（resolve dev warnings and code issues）
+
+Work Log:
+- 全面审查 Modal JS SDK v0.7.4 实际 API（node_modules/modal/dist/index.d.ts），确认 modal-sandbox.ts 中所有 API 调用正确
+  - ModalClient({tokenId, tokenSecret}) ✅
+  - client.apps.fromName(name, {createIfMissing}) ✅
+  - client.images.fromRegistry(tag) ✅
+  - client.sandboxes.create(app, image, params) ✅
+  - sandbox.exec(['bash','-c',cmd], {timeoutMs, mode:'text'}) ✅
+  - proc.stdout.readText() / proc.stderr.readText() ✅
+- 修复 modal-sandbox.ts readFile() 对空文件返回 null 的 bug（现在空文件返回空字符串）
+- 移除 writeFile() 中未使用的 escapedContent 死代码
+- 修复 chat/route.ts 中 handleClarify 返回类型 Promise<string> → string
+- 修复 instrumentation.ts Edge Runtime 警告（使用 dynamic require 避免静态分析）
+- 修复 next.config.ts allowedDevOrigins 类型警告（RegExp[] → string[] 域名通配符）
+- ESLint 通过，dev server 所有警告消除
+- 验证 /api/sandbox 健康检查端点正常工作
+- commit 07f422e + push 到 origin/main
+
+Stage Summary:
+- 4 个文件修改，19 insertions, 11 deletions
+- Modal SDK API 验证正确，沙箱集成代码无问题
+- 3 个 dev warnings 完全消除（Edge Runtime、allowedDevOrigins）
+- 3 个代码 bug 修复（readFile 空文件、writeFile 死代码、handleClarify 类型）
