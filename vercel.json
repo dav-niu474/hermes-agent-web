@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "bunx prisma generate && bunx prisma db push --skip-generate --accept-data-loss && next build",
+  "buildCommand": "bunx prisma generate && next build",
   "installCommand": "bun install --no-save",
   "regions": ["hkg1"],
   "functions": {

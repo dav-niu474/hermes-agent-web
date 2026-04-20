@@ -18,7 +18,9 @@ let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 export async function register() {
   // This function is called once when the Next.js server starts
   // Only run in Node.js runtime — not Edge Runtime
-  if (process.env.NEXT_RUNTIME === "nodejs") {
+  // In Vercel serverless, skip the background scheduler entirely
+  // (use Vercel Cron via vercel.json instead)
+  if (process.env.NEXT_RUNTIME === "nodejs" && !process.env.VERCEL) {
     startScheduler();
   }
 }
@@ -31,16 +33,15 @@ async function startScheduler() {
 
   console.log("[Scheduler] Starting background cron scheduler (tick every 60s)...");
 
-  // Register signal handlers via dynamic require to avoid Turbopack static analysis
-  // warning about Edge Runtime. These are Node.js-only APIs guarded by the
-  // NEXT_RUNTIME check in register().
+  // Register signal handlers — use global process directly since we're
+  // already guarded by NEXT_RUNTIME === "nodejs" check in register().
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const nodeProcess = require("node:process");
-    nodeProcess.on("SIGTERM", stopScheduler);
-    nodeProcess.on("SIGINT", stopScheduler);
+    if (typeof process !== "undefined") {
+      process.on("SIGTERM", stopScheduler);
+      process.on("SIGINT", stopScheduler);
+    }
   } catch {
-    // Not in Node.js environment — skip signal handlers
+    // Signal handlers not supported in this environment — skip
   }
 
   // Run an initial tick on startup (with delay to let the server fully start)
