@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveApiKey, resolveBaseUrl } from "@/lib/hermes";
+import { resolveApiKey, resolveBaseUrl } from "@/lib/hermes/config";
 
 /**
  * POST /api/benchmark
