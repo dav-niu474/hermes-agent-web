@@ -4,10 +4,14 @@
  * Provides a serverless, isolated container environment for terminal command execution.
  * Manages sandbox lifecycle (create → execute → cleanup) with idle timeout tracking.
  *
- * Uses the official Modal JS SDK (modal npm package) API:
- *   - ModalClient → apps.fromName() → sandboxes.create()
- *   - sandbox.exec(['bash', '-c', cmd]) → ContainerProcess
- *   - process.stdout.readText() / process.stderr.readText()
+ * Uses the official Modal JS SDK (modal npm package) v0.7.4 API:
+ *   - new ModalClient({tokenId, tokenSecret})
+ *   - client.apps.fromName(name, {createIfMissing})
+ *   - client.images.fromRegistry(tag)
+ *   - client.sandboxes.create(app, image, params)
+ *   - sandbox.exec(command[], {timeoutMs, mode: 'text'})
+ *   - proc.stdout.readText() / proc.stderr.readText()
+ *   - proc.wait()
  *
  * Server-side only. Import from API routes or registered-tools.
  */
@@ -21,7 +25,7 @@ export interface ModalSandboxConfig {
   tokenId: string;
   /** Modal Token Secret */
   tokenSecret: string;
-  /** Container image (default: "python:3.11-slim") */
+  /** Container image (default: "python:3.12-slim") */
   image: string;
   /** CPU cores (0.25–8, default: 1) */
   cpu: number;
@@ -31,7 +35,7 @@ export interface ModalSandboxConfig {
   idleTimeout: number;
   /** App name in Modal (default: "hermes-sandbox") */
   appName: string;
-  /** Shell command to run after sandbox creation for provisioning (default: install git, curl, etc.) */
+  /** Shell command to run after sandbox creation for provisioning */
   setupCommand: string;
 }
 
@@ -55,6 +59,17 @@ interface SandboxState {
   execCount: number;
   /** Whether the sandbox has been provisioned (setupCommand executed) */
   provisioned: boolean;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Safely escape a path for use inside single-quoted shell strings.
+ * Handles single quotes by ending the quote, adding an escaped quote, and reopening.
+ * E.g. /tmp/user's file → '/tmp/user'\''s file'
+ */
+function shellEscape(path: string): string {
+  return path.replace(/'/g, "'\\''");
 }
 
 // ─── Singleton Manager ─────────────────────────────────────────────────────
@@ -99,12 +114,18 @@ class ModalSandboxManager {
     return {
       tokenId: resolvedTokenId,
       tokenSecret: resolvedTokenSecret,
-      image: (modalCfg?.image as string) || 'python:3.11-slim',
+      image: (modalCfg?.image as string) || 'python:3.12-slim',
       cpu: Math.min(8, Math.max(0.25, Number(modalCfg?.cpu) || 1)),
       memory: Math.min(8192, Math.max(64, Number(modalCfg?.memory) || 512)),
       idleTimeout: Math.min(3600, Math.max(30, Number(modalCfg?.idle_timeout) || 300)),
       appName: (modalCfg?.app_name as string) || 'hermes-sandbox',
-      setupCommand: (modalCfg?.setup_command as string) || 'apt-get update -qq && apt-get install -y -qq git curl wget jq zip unzip tree 2>/dev/null || pip install --quiet httpx 2>/dev/null; echo "Setup complete"',
+      setupCommand: (modalCfg?.setup_command as string) || [
+        'apt-get update -qq',
+        'apt-get install -y -qq git curl wget jq zip unzip tree ripgrep',
+        'curl -fsSL https://deb.nodesource.com/setup_20.x | bash -',
+        'apt-get install -y -qq nodejs',
+        'echo "Setup complete"',
+      ].join(' && '),
     };
   }
 
@@ -167,7 +188,6 @@ class ModalSandboxManager {
     // Check if existing sandbox is still alive
     if (this.state.sandbox) {
       try {
-        // Quick check: try to get sandboxId from the existing instance
         const sandboxId = this.state.sandbox.sandboxId;
         if (sandboxId) {
           this.resetIdleTimer();
@@ -189,7 +209,7 @@ class ModalSandboxManager {
       const sandbox = await this.client.sandboxes.create(this.app, image, {
         cpu: this.config!.cpu,
         memoryMiB: this.config!.memory,
-        timeoutMs: (this.config!.idleTimeout + 60) * 1000, // lifetime > idle timeout
+        timeoutMs: (this.config!.idleTimeout + 60) * 1000,
         idleTimeoutMs: this.config!.idleTimeout * 1000,
         // Keep sandbox alive with sleep command
         command: ['sleep', 'infinity'],
@@ -216,6 +236,9 @@ class ModalSandboxManager {
   /**
    * Run setup command to provision the sandbox with common dev tools.
    * Only runs once per sandbox instance.
+   *
+   * IMPORTANT: Must use mode: 'text' and drain stdout/stderr to prevent
+   * pipe buffer deadlock when apt-get produces large output.
    */
   private async provisionSandbox(): Promise<void> {
     if (this.state.provisioned || !this.config?.setupCommand || !this.state.sandbox) return;
@@ -224,11 +247,21 @@ class ModalSandboxManager {
       console.log('[ModalSandbox] Running provisioning setup command...');
       const proc = await this.state.sandbox.exec(
         ['bash', '-c', this.config.setupCommand],
-        { timeoutMs: 120_000 },
+        { timeoutMs: 180_000, mode: 'text' },
       );
-      const exitCode = await proc.wait();
+
+      // Drain stdout/stderr concurrently with wait to prevent pipe buffer deadlock
+      const [stdout, stderr, exitCode] = await Promise.all([
+        proc.stdout.readText().catch(() => ''),
+        proc.stderr.readText().catch(() => ''),
+        proc.wait(),
+      ]);
+
       this.state.provisioned = true;
       console.log(`[ModalSandbox] Provisioning complete (exit ${exitCode})`);
+      if (stderr) {
+        console.log(`[ModalSandbox] Provisioning stderr: ${stderr.slice(-200)}`);
+      }
     } catch (err) {
       // Provisioning failure is non-fatal — log but continue
       console.warn('[ModalSandbox] Provisioning failed (non-fatal):', err);
@@ -331,16 +364,12 @@ class ModalSandboxManager {
       const cmdPreview = command.length > 100 ? command.slice(0, 100) + '...' : command;
       console.log(`[ModalSandbox] Exec #${this.state.execCount} in ${sandbox.sandboxId}: ${cmdPreview}`);
 
-      // Execute command via sandbox.exec() — takes string array, not a single string
       const proc = await sandbox.exec(
         ['bash', '-c', command],
-        {
-          timeoutMs: effectiveTimeoutMs,
-          mode: 'text',
-        },
+        { timeoutMs: effectiveTimeoutMs, mode: 'text' },
       );
 
-      // Read stdout and stderr concurrently, then wait for exit code
+      // Read stdout and stderr concurrently with wait to prevent pipe buffer deadlock
       const [stdout, stderr, exitCode] = await Promise.all([
         proc.stdout.readText().catch(() => ''),
         proc.stderr.readText().catch(() => ''),
@@ -421,6 +450,8 @@ class ModalSandboxManager {
 
   /**
    * Write a file to the sandbox filesystem.
+   * Uses base64 encoding to safely handle any content (including HERMES_EOF,
+   * single quotes, NUL bytes, and other problematic characters).
    */
   async writeFile(remotePath: string, content: string): Promise<boolean> {
     if (!this.state.initialized) {
@@ -432,11 +463,30 @@ class ModalSandboxManager {
     if (!sandbox) return false;
 
     try {
-      // Use sandbox.exec to write file content via heredoc
-      // The 'HERMES_EOF' delimiter is quoted to prevent variable expansion
-      const writeCmd = `cat > '${remotePath}' << 'HERMES_EOF'\n${content}\nHERMES_EOF`;
-      const proc = await sandbox.exec(['bash', '-c', writeCmd], { timeoutMs: 30_000, mode: 'text' });
-      await proc.wait();
+      // Use base64 encoding to avoid heredoc delimiter collision and shell injection.
+      // This safely handles any content including single quotes, NUL bytes,
+      // backslashes, and the delimiter string itself.
+      const escapedPath = shellEscape(remotePath);
+      const b64 = Buffer.from(content, 'utf-8').toString('base64');
+      const writeCmd = `printf '%s' '${b64}' | base64 -d > '${escapedPath}'`;
+
+      const proc = await sandbox.exec(
+        ['bash', '-c', writeCmd],
+        { timeoutMs: 30_000, mode: 'text' },
+      );
+
+      // Drain stdout/stderr to prevent deadlock
+      const [stdout, stderr, exitCode] = await Promise.all([
+        proc.stdout.readText().catch(() => ''),
+        proc.stderr.readText().catch(() => ''),
+        proc.wait(),
+      ]);
+
+      if (exitCode !== 0) {
+        console.error(`[ModalSandbox] writeFile failed for ${remotePath}: exit ${exitCode}, stderr: ${stderr}`);
+        return false;
+      }
+
       this.resetIdleTimer();
       return true;
     } catch (err) {
@@ -447,6 +497,7 @@ class ModalSandboxManager {
 
   /**
    * Read a file from the sandbox filesystem.
+   * Returns null if the file does not exist or cannot be read.
    */
   async readFile(remotePath: string): Promise<string | null> {
     if (!this.state.initialized) {
@@ -458,10 +509,26 @@ class ModalSandboxManager {
     if (!sandbox) return null;
 
     try {
-      const proc = await sandbox.exec(['bash', '-c', `cat '${remotePath}'`], { timeoutMs: 15_000, mode: 'text' });
-      const stdout = await proc.stdout.readText();
+      const escapedPath = shellEscape(remotePath);
+      const proc = await sandbox.exec(
+        ['bash', '-c', `cat '${escapedPath}'`],
+        { timeoutMs: 15_000, mode: 'text' },
+      );
+
+      // Drain stdout/stderr concurrently, check exit code
+      const [stdout, stderr, exitCode] = await Promise.all([
+        proc.stdout.readText().catch(() => ''),
+        proc.stderr.readText().catch(() => ''),
+        proc.wait(),
+      ]);
+
       this.resetIdleTimer();
-      // Return content as-is; empty string means empty file, null means read failed (caught below)
+
+      // Distinguish "file not found" (exit != 0) from "empty file" (exit 0, empty stdout)
+      if (exitCode !== 0) {
+        return null;
+      }
+
       return stdout;
     } catch (err) {
       console.error(`[ModalSandbox] readFile failed for ${remotePath}:`, err);

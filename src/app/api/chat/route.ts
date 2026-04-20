@@ -905,8 +905,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
       return JSON.stringify({ error: "Missing required parameter: pattern" });
     }
 
-    const maxResults = Math.min(200, Number(args.max_results) || 50);
-    const fileType = args.file_type ? String(args.file_type) : "";
+    const maxResults = Math.min(200, Number(args.limit) || 50);
+    const fileGlob = args.file_glob ? String(args.file_glob) : "";
+    const outputMode = String(args.output_mode || "content");
+    const contextLines = Math.max(0, Number(args.context) || 0);
 
     // ── Modal backend: search in sandbox ──────────────────────────
     if (this.isModalBackend()) {
@@ -915,12 +917,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         const searchPath = String(args.path || "/sandbox");
         const escapedPattern = pattern.replace(/'/g, "'\\''");
         const escapedPath = searchPath.replace(/'/g, "'\\''");
-        let cmd: string;
-        if (fileType) {
-          cmd = `grep -rn --include="*.${fileType}" -m ${maxResults} '${escapedPattern}' '${escapedPath}' 2>/dev/null || echo "NO_MATCHES"`;
-        } else {
-          cmd = `grep -rn -m ${maxResults} '${escapedPattern}' '${escapedPath}' 2>/dev/null || echo "NO_MATCHES"`;
-        }
+        const grepOutputFlag = outputMode === "files_only" ? " -l" : outputMode === "count" ? " -c" : " -rn";
+        const grepContext = contextLines > 0 ? ` -C ${contextLines}` : "";
+        const grepGlob = fileGlob ? ` --include="*.${fileGlob}"` : "";
+        const cmd = `grep${grepOutputFlag}${grepGlob}${grepContext} -m ${maxResults} '${escapedPattern}' '${escapedPath}' 2>/dev/null || echo "NO_MATCHES"`;
         const result = await modalSandbox.execute(cmd, 15);
         if (result.stdout.includes("NO_MATCHES") && result.exitCode !== 0) {
           return JSON.stringify({ matches: [], totalMatches: 0, pattern, message: "No matches found." });
@@ -952,11 +952,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
 
     try {
       let cmd: string;
-      if (fileType) {
-        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} -t ${fileType} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
-      } else {
-        cmd = `rg --no-heading --line-number -n --max-count ${maxResults} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
-      }
+      const rgOutputFlag = outputMode === "files_only" ? " -l" : outputMode === "count" ? " -c" : " --no-heading -n";
+      const rgContext = contextLines > 0 ? ` -C ${contextLines}` : "";
+      const rgGlob = fileGlob ? ` -t ${fileGlob}` : "";
+      cmd = `rg${rgOutputFlag}${rgGlob}${rgContext} --max-count ${maxResults} ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null`;
 
       const { stdout } = await execAsync(cmd, { timeout: 15000, maxBuffer: 1024 * 1024 });
       const matches = stdout.split("\n").filter(Boolean).slice(0, maxResults);
@@ -979,6 +978,11 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
   }
 
   private async handlePatch(args: Record<string, unknown>): Promise<string> {
+    const mode = String(args.mode ?? "replace");
+    if (mode === "patch") {
+      return JSON.stringify({ error: "Patch mode is not supported in this sandbox environment. Use edit mode with old_string and new_string parameters instead." });
+    }
+
     const filePath = String(args.path ?? "");
     const oldString = String(args.old_string ?? "");
     const newString = String(args.new_string ?? "");
@@ -1088,12 +1092,14 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (backend === "modal") {
       try {
         const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
-        const result = await modalSandbox.execute(command, timeout);
+        const workdirArg = args.workdir ? String(args.workdir) : "";
+        const effectiveCommand = workdirArg ? `cd ${workdirArg} && ${command}` : command;
+        const result = await modalSandbox.execute(effectiveCommand, timeout);
         return JSON.stringify({
           stdout: result.stdout,
           stderr: result.stderr || undefined,
           exitCode: result.exitCode,
-          workdir: "/sandbox",
+          workdir: workdirArg || "/sandbox",
           backend: "modal",
           timedOut: result.timedOut,
         });
@@ -1106,7 +1112,7 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
 
     // ── Local backend (default) ───────────────────────────────────
-    const workdir = process.env.HERMES_WORKSPACE || process.cwd();
+    const workdir = args.workdir ? String(args.workdir) : (process.env.HERMES_WORKSPACE || process.cwd());
 
     try {
       const { exec: execCmd } = await import("child_process");
@@ -1345,21 +1351,40 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
   private messageQueue: Array<{id: string; platform: string; channel_id?: string; message: string; reply_to?: string; createdAt: string}> = [];
 
   private async handleSendMessage(args: Record<string, unknown>): Promise<string> {
+    const action = String(args.action ?? "send");
+    const target = String(args.target ?? "web");
     const message = String(args.message ?? "");
-    const platform = String(args.platform ?? "web");
-    const channelId = args.channel_id ? String(args.channel_id) : undefined;
-    const replyTo = args.reply_to ? String(args.reply_to) : undefined;
+
+    if (action === "list") {
+      return JSON.stringify({
+        action: "list",
+        targets: [
+          { platform: "web", id: "web", description: "In-app message queue (sandbox)" },
+        ],
+        note: "In sandbox mode, only the 'web' target is available.",
+      });
+    }
 
     if (!message.trim()) {
       return JSON.stringify({ error: "Missing required parameter: message" });
     }
 
+    // Parse target as "platform:identifier" format
+    const colonIdx = target.indexOf(":");
+    let platform: string;
+    let identifier: string | undefined;
+    if (colonIdx !== -1) {
+      platform = target.slice(0, colonIdx);
+      identifier = target.slice(colonIdx + 1);
+    } else {
+      platform = target;
+    }
+
     const entry = {
       id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       platform,
-      channel_id: channelId,
+      channel_id: identifier,
       message: message.trim(),
-      reply_to: replyTo,
       createdAt: new Date().toISOString(),
     };
 
@@ -1374,8 +1399,9 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
       success: true,
       messageId: entry.id,
       platform,
+      target,
       status: "queued",
-      message: `Message queued for delivery on ${platform}${channelId ? ` (channel: ${channelId})` : ""}.`,
+      message: `Message queued for delivery on ${platform}${identifier ? ` (target: ${identifier})` : ""}.`,
       queuedCount: this.messageQueue.length,
     });
   }
@@ -1454,8 +1480,29 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         return JSON.stringify({ success: true, id: sessionId, status: 'killed' });
       }
 
+      case "wait": {
+        if (!sessionId) return JSON.stringify({ error: "Missing required parameter: session_id" });
+        const proc = this.backgroundProcesses.get(sessionId);
+        if (!proc) return JSON.stringify({ error: `Process '${sessionId}' not found` });
+        const maxWait = Math.min(120, Number(args.timeout) || 120);
+        const start = Date.now();
+        while (proc.status === 'running' && (Date.now() - start) < maxWait * 1000) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        return JSON.stringify({
+          id: sessionId,
+          command: proc.command,
+          status: proc.status,
+          exitCode: proc.exitCode,
+          stdout: proc.stdout.slice(-4000),
+          stderr: proc.stderr.slice(-2000),
+          timedOut: proc.status === 'running',
+          startedAt: proc.startedAt,
+        });
+      }
+
       default:
-        return JSON.stringify({ error: `Unknown process action: '${action}'. Supported: list, poll, log, kill.` });
+        return JSON.stringify({ error: `Unknown process action: '${action}'. Supported: list, poll, log, wait, kill.` });
     }
   }
 
