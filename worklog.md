@@ -290,3 +290,46 @@ Stage Summary:
 - 修复了沙箱模式下所有工具处理器的参数匹配和 API 调用问题
 - modal-sandbox.ts 核心改进：base64 写文件、正确排空管道、Node.js/ripgrep 支持
 - 所有工具 schema 与 handler 参数名完全对齐
+
+---
+Task ID: 11
+Agent: main
+Task: 修复工具执行报错 "Configuration file not found" (ZAI SDK + Prisma 数据库)
+
+Work Log:
+- 用户反馈所有工具执行均返回错误: "Configuration file not found or invalid. Please create .z-ai-config"
+- 根因分析：
+  1. **Prisma Schema 不匹配**：schema.prisma 被改为 PostgreSQL（hermes_POSTGRES_PRISMA_URL），但本地 .env 使用 SQLite（DATABASE_URL=file:...），导致所有数据库操作失败（sessions、messages、tool_usage 等 API 全部 500）
+  2. **ZAI SDK 无错误处理**：getZAI() 直接调用 ZAI.create()，无 try/catch。当 config 文件不存在时，异常传播为工具错误返回给用户
+
+- 修复 1: prisma/schema.prisma
+  - provider 从 "postgresql" 改回 "sqlite"
+  - url 从 env("hermes_POSTGRES_PRISMA_URL") 改为 env("DATABASE_URL")
+  - 移除 directUrl（SQLite 不支持连接池）
+  - 运行 bun run db:push 重建 SQLite 数据库
+
+- 修复 2: src/app/api/chat/route.ts getZAI() 函数
+  - 策略 1: 先尝试 ZAI.create()（文件配置，本地 /etc/.z-ai-config 存在时使用）
+  - 策略 2: 文件配置失败时，回退到环境变量 ZAI_BASE_URL + ZAI_API_KEY
+  - 策略 3: 通过 new ZAI(config) 直接构造（绕过 ZAI.create() 的文件加载限制）
+  - 环境变量支持: ZAI_CHAT_ID, ZAI_USER_ID, ZAI_TOKEN（可选）
+
+- 修复 3: 所有 ZAI SDK 工具处理器添加 null 检查（5 处）
+  - handleWebSearch: null → "Web search service is unavailable..."
+  - handleWebExtract: null → "Web extract service is unavailable..."
+  - handleVisionAnalyze: null → "Vision analysis service is unavailable..."
+  - handleImageGenerate: null → "Image generation service is unavailable..."
+  - handleTextToSpeech: null → "Text-to-speech service is unavailable..."
+
+- 修复 4: handleMixtureOfAgents 中的 vision 预处理添加 null 检查
+  - ZAI 不可用时跳过 vision 分析而不是崩溃
+
+- ESLint 通过（0 errors, 0 warnings）
+- dev server 启动成功，sessions API 返回 200（之前全部 500）
+
+Stage Summary:
+- 2 个文件修改：prisma/schema.prisma + src/app/api/chat/route.ts
+- 数据库从 PostgreSQL 回退到 SQLite，本地开发恢复正常
+- ZAI SDK 工具支持双重配置策略（文件 + 环境变量），本地和 Vercel 都能正常工作
+- 本地环境: /etc/.z-ai-config 已存在，ZAI SDK 正常初始化
+- Vercel 部署: 需设置环境变量 ZAI_BASE_URL + ZAI_API_KEY

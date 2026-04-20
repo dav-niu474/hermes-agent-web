@@ -139,12 +139,49 @@ const WEB_COMPATIBLE_TOOLS = new Set([
 // ZAI SDK lazy singleton
 // ---------------------------------------------------------------------------
 
-let _zaiInstance: Awaited<ReturnType<typeof import("z-ai-web-dev-sdk").default.create>> | null = null;
+let _zaiInstance: any = null;
 
+/**
+ * Initialize the ZAI SDK singleton.
+ * Priority:
+ *   1. File-based config (.z-ai-config) via ZAI.create()
+ *   2. Environment variables ZAI_BASE_URL + ZAI_API_KEY
+ *   3. Environment variables ZAI_CHAT_ID, ZAI_USER_ID, ZAI_TOKEN (optional)
+ */
 async function getZAI() {
   if (!_zaiInstance) {
-    const ZAI = (await import("z-ai-web-dev-sdk")).default;
-    _zaiInstance = await ZAI.create();
+    try {
+      const ZAI = (await import("z-ai-web-dev-sdk")).default;
+
+      // Strategy 1: file-based config (local dev with /etc/.z-ai-config etc.)
+      _zaiInstance = await ZAI.create();
+      console.log("[ZAI] Initialized from config file");
+    } catch (fileErr) {
+      console.warn("[ZAI] Config file not found, trying environment variables…");
+
+      // Strategy 2: environment variables
+      const baseUrl = process.env.ZAI_BASE_URL;
+      const apiKey = process.env.ZAI_API_KEY;
+      if (baseUrl && apiKey) {
+        try {
+          const ZAI = (await import("z-ai-web-dev-sdk")).default;
+          // Bypass ZAI.create() and call the constructor directly with programmatic config
+          // @ts-expect-error — constructor is private in TS types but public in JS runtime
+          _zaiInstance = new ZAI({
+            baseUrl,
+            apiKey,
+            chatId: process.env.ZAI_CHAT_ID || undefined,
+            userId: process.env.ZAI_USER_ID || undefined,
+            token: process.env.ZAI_TOKEN || undefined,
+          });
+          console.log("[ZAI] Initialized from environment variables");
+        } catch (envErr) {
+          console.error("[ZAI] Failed to initialize from env vars:", envErr);
+        }
+      } else {
+        console.warn("[ZAI] No config file found and ZAI_BASE_URL/ZAI_API_KEY env vars not set. ZAI tools will be unavailable.");
+      }
+    }
   }
   return _zaiInstance;
 }
@@ -315,6 +352,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
 
     const zai = await getZAI();
+    if (!zai) {
+      return JSON.stringify({ error: "Web search service is unavailable. The ZAI SDK is not configured. Please set up .z-ai-config or environment variables (ZAI_BASE_URL, ZAI_API_KEY)." });
+    }
+
     const results = await zai.functions.invoke("web_search", {
       query,
       num: 5,
@@ -345,6 +386,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
 
     const zai = await getZAI();
+    if (!zai) {
+      return JSON.stringify({ error: "Web extract service is unavailable. The ZAI SDK is not configured. Please set up .z-ai-config or environment variables (ZAI_BASE_URL, ZAI_API_KEY)." });
+    }
+
     const results: string[] = [];
 
     for (const url of urls.slice(0, 5)) {
@@ -376,6 +421,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
 
     const zai = await getZAI();
+    if (!zai) {
+      return JSON.stringify({ error: "Vision analysis service is unavailable. The ZAI SDK is not configured. Please set up .z-ai-config or environment variables (ZAI_BASE_URL, ZAI_API_KEY)." });
+    }
+
     const response = await zai.chat.completions.createVision({
       messages: [
         {
@@ -408,6 +457,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     else if (aspectRatio === "square") size = "1024x1024";
 
     const zai = await getZAI();
+    if (!zai) {
+      return JSON.stringify({ error: "Image generation service is unavailable. The ZAI SDK is not configured. Please set up .z-ai-config or environment variables (ZAI_BASE_URL, ZAI_API_KEY)." });
+    }
+
     const response = await zai.images.generations.create({
       prompt,
       size,
@@ -448,6 +501,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     const truncatedText = text.substring(0, 1024);
 
     const zai = await getZAI();
+    if (!zai) {
+      return JSON.stringify({ error: "Text-to-speech service is unavailable. The ZAI SDK is not configured. Please set up .z-ai-config or environment variables (ZAI_BASE_URL, ZAI_API_KEY)." });
+    }
+
     const response = await zai.audio.tts.create({
       input: truncatedText,
       voice: "tongtong",
@@ -1632,27 +1689,31 @@ export async function POST(request: NextRequest) {
     ) {
       try {
         const zai = await getZAI();
-        const visionResponse = await zai.chat.completions.createVision({
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: 'Describe this image in detail. If the user provided a question alongside the image, answer it.' },
-                { type: 'image_url', image_url: { url: lastMessage.image_url } },
-              ],
-            },
-          ],
-          thinking: { type: 'disabled' },
-        });
+        if (!zai) {
+          console.warn("[Vision Pre-check] ZAI SDK not available, skipping vision analysis");
+        } else {
+          const visionResponse = await zai.chat.completions.createVision({
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'Describe this image in detail. If the user provided a question alongside the image, answer it.' },
+                  { type: 'image_url', image_url: { url: lastMessage.image_url } },
+                ],
+              },
+            ],
+            thinking: { type: 'disabled' },
+          });
 
-        const choices = (visionResponse as Record<string, unknown>)?.choices;
-        const firstChoice = Array.isArray(choices) && choices.length > 0 ? choices[0] as Record<string, unknown> : null;
-        const visionMessage = firstChoice?.message as Record<string, unknown> | undefined;
-        const visionText = (visionMessage?.content as string) ?? '';
+          const choices = (visionResponse as Record<string, unknown>)?.choices;
+          const firstChoice = Array.isArray(choices) && choices.length > 0 ? choices[0] as Record<string, unknown> : null;
+          const visionMessage = firstChoice?.message as Record<string, unknown> | undefined;
+          const visionText = (visionMessage?.content as string) ?? '';
 
-        if (visionText) {
-          // Prepend the image analysis to the user message content
-          lastMessage.content = `[User uploaded an image. Vision analysis: ${visionText}]\n\n${lastMessage.content || ''}`;
+          if (visionText) {
+            // Prepend the image analysis to the user message content
+            lastMessage.content = `[User uploaded an image. Vision analysis: ${visionText}]\n\n${lastMessage.content || ''}`;
+          }
         }
       } catch (visionErr) {
         console.error('[Chat API] Vision analysis failed:', visionErr);

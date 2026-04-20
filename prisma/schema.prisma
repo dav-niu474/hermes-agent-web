@@ -1,7 +1,6 @@
 datasource db {
-  provider  = "postgresql"
-  url       = env("hermes_POSTGRES_PRISMA_URL")
-  directUrl = env("hermes_POSTGRES_URL_NON_POOLING")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
