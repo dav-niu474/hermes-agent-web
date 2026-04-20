@@ -256,3 +256,37 @@ Stage Summary:
 - Modal SDK API 验证正确，沙箱集成代码无问题
 - 3 个 dev warnings 完全消除（Edge Runtime、allowedDevOrigins）
 - 3 个代码 bug 修复（readFile 空文件、writeFile 死代码、handleClarify 类型）
+
+---
+Task ID: 10
+Agent: main
+Task: 修复沙箱模式下的工具使用问题
+
+Work Log:
+- 全面审计沙箱模式下所有工具处理器代码（route.ts 2093行 + modal-sandbox.ts 513行）
+- 发现并修复 10 个问题，按优先级分类：
+
+**[P0] 关键修复：**
+1. provisionSandbox() 缺少 mode:'text' — apt-get 输出可能导致管道缓冲区死锁
+2. writeFile() heredoc 碰撞 — 内容包含 HERMES_EOF 时命令注入
+3. writeFile() 路径注入 — remotePath 含单引号时逃逸
+4. readFile() 未排空 stderr + 未检查 exit code — 空文件与不存在文件不可区分
+5. search_files 参数名不匹配 schema — file_type→file_glob, max_results→limit 等
+6. patch handler 忽略 mode 参数 — mode='patch' 时应拒绝并引导
+7. terminal handler 忽略 workdir — LLM 发送的 workdir 参数被丢弃
+
+**[P1] 重要修复：**
+8. process handler 缺少 wait action — LLM 调用会报错
+9. send_message handler schema 完全不匹配 — platform/channel_id→action/target/message
+
+**[P2] 改进：**
+10. provisioning 命令升级：安装 ripgrep + Node.js 20.x
+
+- ESLint 通过，dev server 编译成功无错误
+- commit 843c3a8 + push 到 origin/main
+
+Stage Summary:
+- 2 个文件修改，163 insertions, 49 deletions
+- 修复了沙箱模式下所有工具处理器的参数匹配和 API 调用问题
+- modal-sandbox.ts 核心改进：base64 写文件、正确排空管道、Node.js/ripgrep 支持
+- 所有工具 schema 与 handler 参数名完全对齐
