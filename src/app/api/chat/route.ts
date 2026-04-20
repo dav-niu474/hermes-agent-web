@@ -164,6 +164,8 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
   private todoStore = new Map<string, Array<{id: string; content: string; status: string}>>();
   /** Override terminal backend from request */
   private terminalBackendOverride: string | null;
+  /** Cached resolved backend (local or modal) */
+  private resolvedBackend: string | null;
 
   constructor(toolNames: string[], terminalBackendOverride?: string) {
     // Only include tools that are actually executable in the web context
@@ -180,6 +182,46 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
         },
       }));
     console.log(`[ToolRegistry] ${this.toolSchemas.length} web-compatible tools: ${[...this.toolNames].join(", ")}`);
+  }
+
+  // ── Backend resolution helper ─────────────────────────────────────
+
+  /**
+   * Resolve the effective terminal/backend mode.
+   * In Vercel serverless environments, auto-switches to 'modal' if configured.
+   */
+  private resolveBackend(): string {
+    if (this.resolvedBackend) return this.resolvedBackend;
+
+    // 1. Explicit request override
+    if (this.terminalBackendOverride) {
+      this.resolvedBackend = this.terminalBackendOverride;
+      return this.resolvedBackend;
+    }
+
+    // 2. Config file setting
+    try {
+      const config = loadConfig();
+      const backend = String((config.terminal as Record<string, unknown>)?.backend || "local");
+
+      // 3. Auto-detect serverless: if in Vercel and backend is "local", auto-switch to modal
+      if (backend === "local" && process.env.VERCEL && process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET) {
+        console.log("[ToolRegistry] Serverless environment detected, auto-switching to modal sandbox");
+        this.resolvedBackend = "modal";
+        return this.resolvedBackend;
+      }
+
+      this.resolvedBackend = backend;
+      return this.resolvedBackend;
+    } catch {
+      this.resolvedBackend = "local";
+      return this.resolvedBackend;
+    }
+  }
+
+  /** Whether the current backend is Modal sandbox */
+  private isModalBackend(): boolean {
+    return this.resolveBackend() === "modal";
   }
 
   getToolDefinitions(): OpenAI.ChatCompletionTool[] {
@@ -718,6 +760,40 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!filePath.trim()) {
       return JSON.stringify({ error: "Missing required parameter: path" });
     }
+    const offset = Math.max(1, Number(args.offset) || 1);
+    const limit = Math.min(2000, Math.max(1, Number(args.limit) || 500));
+
+    // ── Modal backend: read file from sandbox ─────────────────────
+    if (this.isModalBackend()) {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        // Read full file and apply offset/limit via shell
+        const escapedPath = filePath.replace(/'/g, "'\\''");
+        const cmd = `wc -l < '${escapedPath}' 2>/dev/null && tail -n +${offset} '${escapedPath}' 2>/dev/null | head -n ${limit} | awk '{printf "%6d\\t%s\\n", NR+${offset - 1}, $0}'`;
+        const result = await modalSandbox.execute(cmd, 15);
+        if (result.exitCode !== 0) {
+          return JSON.stringify({ error: `Failed to read file: ${result.stderr || "file not found"}` });
+        }
+        const outputLines = result.stdout.split("\n");
+        const totalLines = parseInt(outputLines[0]?.trim() || "0", 10);
+        const numbered = outputLines.slice(1).join("\n");
+        const shownLines = numbered.split("\n").filter(Boolean).length;
+        return JSON.stringify({
+          content: numbered.trimEnd(),
+          totalLines,
+          shownLines,
+          startLine: offset,
+          endLine: offset + shownLines - 1,
+          path: filePath,
+          truncated: offset + shownLines - 1 < totalLines,
+          backend: "modal",
+        });
+      } catch (err: any) {
+        return JSON.stringify({ error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
+    // ── Local backend (default) ────────────────────────────────────
     const { readFile } = await import("fs/promises");
     const pathMod = await import("path");
 
@@ -729,7 +805,6 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
       } else {
         resolved = pathMod.resolve(workspaceRoot, filePath);
       }
-      // Security: ensure path is within workspace
       const relative = pathMod.relative(workspaceRoot, resolved);
       if (relative.startsWith("..")) {
         return JSON.stringify({ error: `Access denied: path is outside workspace` });
@@ -737,8 +812,6 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
 
       const content = await readFile(resolved, "utf-8");
       const lines = content.split("\n");
-      const offset = Math.max(1, Number(args.offset) || 1);
-      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 500));
       const startIdx = offset - 1;
       const endIdx = Math.min(lines.length, startIdx + limit);
       const selectedLines = lines.slice(startIdx, endIdx);
@@ -770,6 +843,31 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!filePath.trim()) {
       return JSON.stringify({ error: "Missing required parameter: path" });
     }
+
+    // ── Modal backend: write file to sandbox ──────────────────────
+    if (this.isModalBackend()) {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        // Create parent directories and write file
+        const escapedPath = filePath.replace(/'/g, "'\\''");
+        await modalSandbox.execute(`mkdir -p "$(dirname '${escapedPath}')"`, 10);
+        const success = await modalSandbox.writeFile(filePath, content);
+        if (!success) {
+          return JSON.stringify({ error: "Failed to write file to sandbox" });
+        }
+        return JSON.stringify({
+          success: true,
+          path: filePath,
+          bytesWritten: Buffer.byteLength(content, "utf-8"),
+          message: `File written successfully: ${filePath}`,
+          backend: "modal",
+        });
+      } catch (err: any) {
+        return JSON.stringify({ error: `Failed to write file: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
+    // ── Local backend (default) ────────────────────────────────────
     const { writeFile, mkdir } = await import("fs/promises");
     const pathMod = await import("path");
 
@@ -806,6 +904,44 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!pattern.trim()) {
       return JSON.stringify({ error: "Missing required parameter: pattern" });
     }
+
+    const maxResults = Math.min(200, Number(args.max_results) || 50);
+    const fileType = args.file_type ? String(args.file_type) : "";
+
+    // ── Modal backend: search in sandbox ──────────────────────────
+    if (this.isModalBackend()) {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        const searchPath = String(args.path || "/sandbox");
+        const escapedPattern = pattern.replace(/'/g, "'\\''");
+        const escapedPath = searchPath.replace(/'/g, "'\\''");
+        let cmd: string;
+        if (fileType) {
+          cmd = `grep -rn --include="*.${fileType}" -m ${maxResults} '${escapedPattern}' '${escapedPath}' 2>/dev/null || echo "NO_MATCHES"`;
+        } else {
+          cmd = `grep -rn -m ${maxResults} '${escapedPattern}' '${escapedPath}' 2>/dev/null || echo "NO_MATCHES"`;
+        }
+        const result = await modalSandbox.execute(cmd, 15);
+        if (result.stdout.includes("NO_MATCHES") && result.exitCode !== 0) {
+          return JSON.stringify({ matches: [], totalMatches: 0, pattern, message: "No matches found." });
+        }
+        const matches = result.stdout.split("\n").filter(Boolean).slice(0, maxResults);
+        const results = matches.map((line) => {
+          const colonIdx = line.indexOf(":");
+          if (colonIdx === -1) return { file: "", line: 0, content: line };
+          const file = line.slice(0, colonIdx);
+          const rest = line.slice(colonIdx + 1);
+          const secondColon = rest.indexOf(":");
+          if (secondColon === -1) return { file, line: 0, content: rest };
+          return { file, line: parseInt(rest.slice(0, secondColon), 10), content: rest.slice(secondColon + 1) };
+        });
+        return JSON.stringify({ matches: results, totalMatches: results.length, pattern, truncated: results.length >= maxResults, backend: "modal" });
+      } catch (err: any) {
+        return JSON.stringify({ error: `Search failed: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
+    // ── Local backend (default) ────────────────────────────────────
     const { exec: execCmd } = await import("child_process");
     const { promisify } = await import("util");
     const execAsync = promisify(execCmd);
@@ -813,8 +949,6 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
 
     const workspaceRoot = process.env.HERMES_WORKSPACE || process.cwd();
     const searchPath = args.path ? pathMod.resolve(workspaceRoot, String(args.path)) : workspaceRoot;
-    const maxResults = Math.min(200, Number(args.max_results) || 50);
-    const fileType = args.file_type ? String(args.file_type) : "";
 
     try {
       let cmd: string;
@@ -851,6 +985,61 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!filePath.trim() || !oldString) {
       return JSON.stringify({ error: "Missing required parameters: path, old_string" });
     }
+
+    // ── Modal backend: patch file in sandbox ──────────────────────
+    if (this.isModalBackend()) {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        const escapedPath = filePath.replace(/'/g, "'\\''");
+        // Write a helper Python script to the sandbox for safe patching
+        const scriptPath = `/tmp/patch_${Date.now()}.py`;
+        // Base64-encode old/new strings to avoid shell escaping issues
+        const btoa = (s: string) => Buffer.from(s, "utf-8").toString("base64");
+        const oldB64 = btoa(oldString);
+        const newB64 = btoa(newString);
+        const scriptContent = [
+          "import sys, base64",
+          `path = ${JSON.stringify(filePath)}`,
+          `old = base64.b64decode("${oldB64}").decode("utf-8")`,
+          `new = base64.b64decode("${newB64}").decode("utf-8")`,
+          "try:",
+          "    with open(path, 'r') as f:",
+          "        content = f.read()",
+          "    if old not in content:",
+          "        print('PATTERN_NOT_FOUND')",
+          "        sys.exit(1)",
+          "    count = content.count(old)",
+          "    content = content.replace(old, new)",
+          "    with open(path, 'w') as f:",
+          "        f.write(content)",
+          '    print(f"OK:{count}")',
+          "except Exception as e:",
+          '    print(f"ERROR:{e}")',
+          "    sys.exit(1)",
+        ].join("\n");
+        await modalSandbox.writeFile(scriptPath, scriptContent);
+        const result = await modalSandbox.execute(`python3 "${scriptPath}" && rm -f "${scriptPath}"`, 15);
+        if (result.exitCode !== 0 || result.stdout.trim() === "PATTERN_NOT_FOUND") {
+          return JSON.stringify({ error: `Pattern not found in file. The old_string does not match any content.` });
+        }
+        if (result.stdout.startsWith("ERROR:")) {
+          return JSON.stringify({ error: `Failed to patch file: ${result.stdout.slice(6)}` });
+        }
+        const countStr = result.stdout.replace("OK:", "").trim();
+        const occurrences = parseInt(countStr, 10) || 0;
+        return JSON.stringify({
+          success: true,
+          path: filePath,
+          replacements: occurrences,
+          message: `Patched ${occurrences} occurrence(s) in ${filePath}`,
+          backend: "modal",
+        });
+      } catch (err: any) {
+        return JSON.stringify({ error: `Failed to patch file: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
+    // ── Local backend (default) ────────────────────────────────────
     const { readFile, writeFile } = await import("fs/promises");
     const pathMod = await import("path");
 
@@ -890,24 +1079,10 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!command.trim()) {
       return JSON.stringify({ error: "Missing required parameter: command" });
     }
-    const { exec: execCmd } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(execCmd);
-    const pathMod = await import("path");
-
-    // Resolve terminal backend: request override > config
-    let backend = "local";
-    try {
-      if (this.terminalBackendOverride) {
-        backend = this.terminalBackendOverride;
-      } else {
-        const config = loadConfig();
-        backend = String((config.terminal as Record<string, unknown>)?.backend || "local");
-      }
-    } catch { /* fall through to local */ }
 
     const configTimeout = (loadConfig().terminal?.timeout as number) || 180;
     const timeout = Math.min(300, Math.max(5, Number(args.timeout) || configTimeout));
+    const backend = this.resolveBackend();
 
     // ── Modal backend ─────────────────────────────────────────────
     if (backend === "modal") {
@@ -934,6 +1109,9 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     const workdir = process.env.HERMES_WORKSPACE || process.cwd();
 
     try {
+      const { exec: execCmd } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(execCmd);
       const { stdout, stderr } = await execAsync(command, {
         timeout: timeout * 1000,
         maxBuffer: 1024 * 1024,
@@ -963,6 +1141,43 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     if (!code.trim()) {
       return JSON.stringify({ error: "Missing required parameter: code" });
     }
+
+    // ── Modal backend: write code to sandbox and execute ────────────
+    if (this.isModalBackend()) {
+      try {
+        const { modalSandbox } = await import("@/lib/hermes/modal-sandbox");
+        let tmpFile: string;
+        let cmd: string;
+        if (language === "javascript" || language === "js" || language === "node") {
+          tmpFile = `/tmp/hermes-code-${Date.now()}.js`;
+          cmd = `node "${tmpFile}"`;
+        } else {
+          tmpFile = `/tmp/hermes-code-${Date.now()}.py`;
+          cmd = `python3 "${tmpFile}"`;
+        }
+        // Write code to sandbox file
+        await modalSandbox.writeFile(tmpFile, code);
+        // Execute and cleanup
+        const result = await modalSandbox.execute(`${cmd} && rm -f "${tmpFile}" || { rm -f "${tmpFile}"; false; }`, 60);
+        return JSON.stringify({
+          output: result.stdout,
+          errors: result.stderr,
+          exitCode: result.exitCode,
+          language,
+          backend: "modal",
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          output: "",
+          errors: err instanceof Error ? err.message : String(err),
+          exitCode: 1,
+          language,
+          backend: "modal",
+        });
+      }
+    }
+
+    // ── Local backend (default) ────────────────────────────────────
     const { exec: execCmd } = await import("child_process");
     const { promisify } = await import("util");
     const { writeFile, unlink } = await import("fs/promises");
@@ -1488,8 +1703,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Terminal backend environment hint ──
-    const resolvedTerminalBackend = body.terminalBackend
+    // Use the same resolution logic as tool handlers (auto-detect serverless)
+    let resolvedTerminalBackend = body.terminalBackend
       || String((config.terminal as Record<string, unknown>)?.backend || "local");
+    // Auto-detect: in Vercel serverless, switch to modal if configured
+    if (resolvedTerminalBackend === "local" && process.env.VERCEL && process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET) {
+      resolvedTerminalBackend = "modal";
+    }
     const isModal = resolvedTerminalBackend === "modal";
     const terminalEnvHint = isModal
       ? "# Execution environment\n" +

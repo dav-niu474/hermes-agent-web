@@ -4,6 +4,11 @@
  * Provides a serverless, isolated container environment for terminal command execution.
  * Manages sandbox lifecycle (create → execute → cleanup) with idle timeout tracking.
  *
+ * Uses the official Modal JS SDK (modal npm package) API:
+ *   - ModalClient → apps.fromName() → sandboxes.create()
+ *   - sandbox.exec(['bash', '-c', cmd]) → ContainerProcess
+ *   - process.stdout.readText() / process.stderr.readText()
+ *
  * Server-side only. Import from API routes or registered-tools.
  */
 
@@ -30,11 +35,18 @@ export interface ModalSandboxConfig {
   setupCommand: string;
 }
 
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+}
+
 interface SandboxState {
-  /** Whether the sandbox client is initialized */
+  /** Whether the ModalClient is initialized */
   initialized: boolean;
-  /** Active sandbox ID (if running) */
-  sandboxId: string | null;
+  /** Active sandbox instance (if running) */
+  sandbox: any | null;
   /** Last activity timestamp */
   lastActivity: number;
   /** Idle cleanup timer */
@@ -45,19 +57,12 @@ interface SandboxState {
   provisioned: boolean;
 }
 
-interface ExecResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-}
-
 // ─── Singleton Manager ─────────────────────────────────────────────────────
 
 class ModalSandboxManager {
   private state: SandboxState = {
     initialized: false,
-    sandboxId: null,
+    sandbox: null,
     lastActivity: Date.now(),
     idleTimer: null,
     execCount: 0,
@@ -65,7 +70,10 @@ class ModalSandboxManager {
   };
 
   private config: ModalSandboxConfig | null = null;
-  private modalClient: any = null;
+  /** ModalClient instance */
+  private client: any = null;
+  /** Modal App instance (lazy-created) */
+  private app: any = null;
 
   // ── Config resolution ──────────────────────────────────────────────
 
@@ -75,11 +83,9 @@ class ModalSandboxManager {
    *   2. Hermes config.yaml (terminal.modal section)
    */
   private resolveConfig(): ModalSandboxConfig | null {
-    // Check for token credentials first
     const tokenId = process.env.MODAL_TOKEN_ID || '';
     const tokenSecret = process.env.MODAL_TOKEN_SECRET || '';
 
-    // Also check Hermes config for modal section
     const hermesConfig = loadConfig();
     const modalCfg = (hermesConfig.terminal as Record<string, unknown>)?.modal as Record<string, unknown> | undefined;
 
@@ -109,7 +115,7 @@ class ModalSandboxManager {
    * Returns true on success, false if credentials are missing or init fails.
    */
   async initialize(): Promise<boolean> {
-    if (this.state.initialized && this.modalClient) {
+    if (this.state.initialized && this.client) {
       return true;
     }
 
@@ -122,12 +128,17 @@ class ModalSandboxManager {
     this.config = config;
 
     try {
-      // Dynamic import of modal SDK
-      const { Sandbox } = await import('modal');
+      // Dynamic import of Modal JS SDK
+      const { ModalClient } = await import('modal');
 
-      this.modalClient = new Sandbox({
+      this.client = new ModalClient({
         tokenId: config.tokenId,
         tokenSecret: config.tokenSecret,
+      });
+
+      // Pre-resolve the App (creates if not exists)
+      this.app = await this.client.apps.fromName(config.appName, {
+        createIfMissing: true,
       });
 
       this.state.initialized = true;
@@ -136,6 +147,8 @@ class ModalSandboxManager {
     } catch (err) {
       console.error('[ModalSandbox] Failed to initialize:', err);
       this.state.initialized = false;
+      this.client = null;
+      this.app = null;
       return false;
     }
   }
@@ -143,45 +156,57 @@ class ModalSandboxManager {
   // ── Sandbox lifecycle ──────────────────────────────────────────────
 
   /**
-   * Ensure a sandbox is running. Creates a new one if needed.
+   * Ensure a sandbox instance is running. Creates a new one if needed.
    */
-  private async ensureSandbox(): Promise<string | null> {
-    if (!this.modalClient) {
+  private async ensureSandbox(): Promise<any | null> {
+    if (!this.client || !this.app) {
       console.error('[ModalSandbox] Not initialized');
       return null;
     }
 
     // Check if existing sandbox is still alive
-    if (this.state.sandboxId) {
-      this.resetIdleTimer();
-      return this.state.sandboxId;
+    if (this.state.sandbox) {
+      try {
+        // Quick check: try to get sandboxId from the existing instance
+        const sandboxId = this.state.sandbox.sandboxId;
+        if (sandboxId) {
+          this.resetIdleTimer();
+          return this.state.sandbox;
+        }
+      } catch {
+        // Sandbox object might be stale
+        this.state.sandbox = null;
+      }
     }
 
     try {
       console.log('[ModalSandbox] Creating new sandbox...');
 
-      // Create sandbox via Modal's interactive API
-      const sandbox = await this.modalClient.interactive.launch(
-        this.config!.image,
-        {
-          cpu: this.config!.cpu,
-          memory: this.config!.memory,
-        },
-      );
+      // Get the container image from Modal's registry
+      const image = this.client.images.fromRegistry(this.config!.image);
 
-      const sandboxId = typeof sandbox === 'string' ? sandbox : sandbox?.id || `modal-${Date.now()}`;
-      this.state.sandboxId = sandboxId;
+      // Create sandbox with configured resources
+      const sandbox = await this.client.sandboxes.create(this.app, image, {
+        cpu: this.config!.cpu,
+        memoryMiB: this.config!.memory,
+        timeoutMs: (this.config!.idleTimeout + 60) * 1000, // lifetime > idle timeout
+        idleTimeoutMs: this.config!.idleTimeout * 1000,
+        // Keep sandbox alive with sleep command
+        command: ['sleep', 'infinity'],
+      });
+
+      this.state.sandbox = sandbox;
       this.state.execCount = 0;
       this.state.lastActivity = Date.now();
       this.state.provisioned = false;
       this.resetIdleTimer();
 
-      console.log(`[ModalSandbox] Sandbox created: ${sandboxId}`);
+      console.log(`[ModalSandbox] Sandbox created: ${sandbox.sandboxId}`);
 
       // Run setup/provisioning command on fresh sandbox
-      await this.provisionSandbox(sandboxId);
+      await this.provisionSandbox();
 
-      return sandboxId;
+      return sandbox;
     } catch (err) {
       console.error('[ModalSandbox] Failed to create sandbox:', err);
       return null;
@@ -192,14 +217,18 @@ class ModalSandboxManager {
    * Run setup command to provision the sandbox with common dev tools.
    * Only runs once per sandbox instance.
    */
-  private async provisionSandbox(sandboxId: string): Promise<void> {
-    if (this.state.provisioned || !this.config?.setupCommand) return;
+  private async provisionSandbox(): Promise<void> {
+    if (this.state.provisioned || !this.config?.setupCommand || !this.state.sandbox) return;
 
     try {
       console.log('[ModalSandbox] Running provisioning setup command...');
-      await this.modalClient.interactive.exec(sandboxId, this.config.setupCommand, { timeout: 120000 });
+      const proc = await this.state.sandbox.exec(
+        ['bash', '-c', this.config.setupCommand],
+        { timeoutMs: 120_000 },
+      );
+      const exitCode = await proc.wait();
       this.state.provisioned = true;
-      console.log('[ModalSandbox] Provisioning complete');
+      console.log(`[ModalSandbox] Provisioning complete (exit ${exitCode})`);
     } catch (err) {
       // Provisioning failure is non-fatal — log but continue
       console.warn('[ModalSandbox] Provisioning failed (non-fatal):', err);
@@ -232,18 +261,35 @@ class ModalSandboxManager {
       this.state.idleTimer = null;
     }
 
-    if (this.state.sandboxId && this.modalClient) {
+    if (this.state.sandbox) {
       try {
-        await this.modalClient.stop(this.state.sandboxId);
-        console.log(`[ModalSandbox] Sandbox stopped: ${this.state.sandboxId}`);
+        await this.state.sandbox.terminate();
+        console.log(`[ModalSandbox] Sandbox terminated`);
       } catch (err) {
-        console.warn('[ModalSandbox] Error stopping sandbox:', err);
+        console.warn('[ModalSandbox] Error terminating sandbox:', err);
       }
     }
 
-    this.state.sandboxId = null;
+    this.state.sandbox = null;
     this.state.execCount = 0;
     this.state.provisioned = false;
+  }
+
+  /**
+   * Close the Modal client and release all resources.
+   */
+  async close(): Promise<void> {
+    await this.stop();
+    if (this.client) {
+      try {
+        this.client.close();
+      } catch (err) {
+        console.warn('[ModalSandbox] Error closing client:', err);
+      }
+      this.client = null;
+      this.app = null;
+    }
+    this.state.initialized = false;
   }
 
   // ── Command execution ──────────────────────────────────────────────
@@ -261,15 +307,15 @@ class ModalSandboxManager {
       if (!ok) {
         return {
           stdout: '',
-          stderr: 'Modal sandbox not configured. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in ~/.hermes/.env or system environment.',
+          stderr: 'Modal sandbox not configured. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in environment variables.',
           exitCode: 1,
           timedOut: false,
         };
       }
     }
 
-    const sandboxId = await this.ensureSandbox();
-    if (!sandboxId) {
+    const sandbox = await this.ensureSandbox();
+    if (!sandbox) {
       return {
         stdout: '',
         stderr: 'Failed to create Modal sandbox. Check credentials and network connectivity.',
@@ -278,56 +324,77 @@ class ModalSandboxManager {
       };
     }
 
-    const effectiveTimeout = Math.min(300, Math.max(5, timeout)) * 1000;
+    const effectiveTimeoutMs = Math.min(300, Math.max(5, timeout)) * 1000;
 
     try {
       this.state.execCount++;
-      console.log(`[ModalSandbox] Exec #${this.state.execCount} in ${sandboxId}: ${command.slice(0, 100)}...`);
+      const cmdPreview = command.length > 100 ? command.slice(0, 100) + '...' : command;
+      console.log(`[ModalSandbox] Exec #${this.state.execCount} in ${sandbox.sandboxId}: ${cmdPreview}`);
 
-      // Execute command via Modal's exec API
-      const result = await this.modalClient.interactive.exec(
-        this.state.sandboxId!,
-        command,
-        { timeout: effectiveTimeout },
+      // Execute command via sandbox.exec() — takes string array, not a single string
+      const proc = await sandbox.exec(
+        ['bash', '-c', command],
+        {
+          timeoutMs: effectiveTimeoutMs,
+          mode: 'text',
+        },
       );
 
-      const stdout = (result?.stdout || '').trimEnd();
-      const stderr = (result?.stderr || '').trimEnd();
-      const exitCode = Number(result?.exitCode ?? 0);
+      // Read stdout and stderr concurrently, then wait for exit code
+      const [stdout, stderr, exitCode] = await Promise.all([
+        proc.stdout.readText().catch(() => ''),
+        proc.stderr.readText().catch(() => ''),
+        proc.wait().catch((err: any) => {
+          if (err?.message?.includes('timeout') || err?.message?.includes('Timeout')) {
+            return 124;
+          }
+          return 1;
+        }),
+      ]);
 
       this.resetIdleTimer();
 
       return {
-        stdout,
-        stderr: stderr || undefined,
-        exitCode,
-        timedOut: false,
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd(),
+        exitCode: typeof exitCode === 'number' ? exitCode : 1,
+        timedOut: exitCode === 124,
       };
     } catch (err: any) {
-      // Handle timeout
-      if (err?.message?.includes('timeout') || err?.message?.includes('Timeout') || err?.killed) {
-        console.warn(`[ModalSandbox] Command timed out after ${effectiveTimeout}ms`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[ModalSandbox] Exec error: ${errMsg}`);
+
+      // Handle timeout from SDK
+      if (err.name === 'SandboxTimeoutError' || errMsg.includes('timeout') || errMsg.includes('Timeout')) {
         return {
-          stdout: (err.stdout || '').trimEnd(),
-          stderr: (err.stderr || `Command timed out after ${timeout}s`).trimEnd(),
-          exitCode: err.code || 124,
+          stdout: '',
+          stderr: `Command timed out after ${timeout}s`,
+          exitCode: 124,
           timedOut: true,
         };
       }
 
-      // Sandbox might have died — reset and retry once
-      if (err?.message?.includes('not found') || err?.message?.includes('stopped') || err?.message?.includes('expired')) {
+      // Sandbox might have expired — reset and retry once
+      if (errMsg.includes('not found') || errMsg.includes('stopped') || errMsg.includes('expired') || errMsg.includes('SandboxTimeoutError')) {
         console.warn('[ModalSandbox] Sandbox expired, creating new one...');
-        this.state.sandboxId = null;
+        this.state.sandbox = null;
 
-        const retryId = await this.ensureSandbox();
-        if (retryId) {
+        const retrySandbox = await this.ensureSandbox();
+        if (retrySandbox) {
           try {
-            const result = await this.modalClient.interactive.exec(retryId, command, { timeout: effectiveTimeout });
+            const proc = await retrySandbox.exec(
+              ['bash', '-c', command],
+              { timeoutMs: effectiveTimeoutMs, mode: 'text' },
+            );
+            const [stdout, stderr, exitCode] = await Promise.all([
+              proc.stdout.readText().catch(() => ''),
+              proc.stderr.readText().catch(() => ''),
+              proc.wait().catch(() => 1),
+            ]);
             return {
-              stdout: (result?.stdout || '').trimEnd(),
-              stderr: (result?.stderr || '').trimEnd(),
-              exitCode: Number(result?.exitCode ?? 0),
+              stdout: stdout.trimEnd(),
+              stderr: stderr.trimEnd(),
+              exitCode: typeof exitCode === 'number' ? exitCode : 1,
               timedOut: false,
             };
           } catch (retryErr: any) {
@@ -342,9 +409,9 @@ class ModalSandboxManager {
       }
 
       return {
-        stdout: (err.stdout || '').trimEnd(),
-        stderr: (err.stderr || err.message || 'Modal sandbox execution failed').trimEnd(),
-        exitCode: err.code || 1,
+        stdout: '',
+        stderr: errMsg || 'Modal sandbox execution failed',
+        exitCode: 1,
         timedOut: false,
       };
     }
@@ -353,20 +420,23 @@ class ModalSandboxManager {
   // ── File operations ────────────────────────────────────────────────
 
   /**
-   * Upload a file to the sandbox.
+   * Write a file to the sandbox filesystem.
    */
   async writeFile(remotePath: string, content: string): Promise<boolean> {
-    if (!this.state.initialized || !this.state.sandboxId) {
-      await this.initialize();
+    if (!this.state.initialized) {
+      const ok = await this.initialize();
+      if (!ok) return false;
     }
 
-    const sandboxId = await this.ensureSandbox();
-    if (!sandboxId) return false;
+    const sandbox = await this.ensureSandbox();
+    if (!sandbox) return false;
 
     try {
-      // Use exec to write file content via heredoc
-      const escapedContent = content.replace(/'/g, "'\\''");
-      await this.modalClient.interactive.exec(sandboxId, `cat > '${remotePath}' << 'HERMES_EOF'\n${content}\nHERMES_EOF`);
+      // Use sandbox.exec to write file content via heredoc
+      const escapedContent = content.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
+      const writeCmd = `cat > '${remotePath}' << 'HERMES_EOF'\n${content}\nHERMES_EOF`;
+      const proc = await sandbox.exec(['bash', '-c', writeCmd], { timeoutMs: 30_000, mode: 'text' });
+      await proc.wait();
       this.resetIdleTimer();
       return true;
     } catch (err) {
@@ -376,20 +446,22 @@ class ModalSandboxManager {
   }
 
   /**
-   * Read a file from the sandbox.
+   * Read a file from the sandbox filesystem.
    */
   async readFile(remotePath: string): Promise<string | null> {
-    if (!this.state.initialized || !this.state.sandboxId) {
-      await this.initialize();
+    if (!this.state.initialized) {
+      const ok = await this.initialize();
+      if (!ok) return null;
     }
 
-    const sandboxId = await this.ensureSandbox();
-    if (!sandboxId) return null;
+    const sandbox = await this.ensureSandbox();
+    if (!sandbox) return null;
 
     try {
-      const result = await this.modalClient.interactive.exec(sandboxId, `cat '${remotePath}'`);
+      const proc = await sandbox.exec(['bash', '-c', `cat '${remotePath}'`], { timeoutMs: 15_000, mode: 'text' });
+      const stdout = await proc.stdout.readText();
       this.resetIdleTimer();
-      return result?.stdout || null;
+      return stdout || null;
     } catch (err) {
       console.error(`[ModalSandbox] readFile failed for ${remotePath}:`, err);
       return null;
@@ -418,7 +490,7 @@ class ModalSandboxManager {
   } {
     return {
       initialized: this.state.initialized,
-      sandboxId: this.state.sandboxId,
+      sandboxId: this.state.sandbox?.sandboxId || null,
       execCount: this.state.execCount,
       lastActivity: this.state.lastActivity,
       idleTimeout: this.config?.idleTimeout || 300,
