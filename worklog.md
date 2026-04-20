@@ -333,3 +333,44 @@ Stage Summary:
 - ZAI SDK 工具支持双重配置策略（文件 + 环境变量），本地和 Vercel 都能正常工作
 - 本地环境: /etc/.z-ai-config 已存在，ZAI SDK 正常初始化
 - Vercel 部署: 需设置环境变量 ZAI_BASE_URL + ZAI_API_KEY
+
+---
+Task ID: 12
+Agent: main
+Task: 修复默认模型为 NVIDIA 导致 agent 无法工作的问题 + 深度审查工具和 skills 系统
+
+Work Log:
+- 深度审计了 agent 完整工具链路：
+  - 模型定义 (models.ts) — 52 个模型，DEFAULT_MODEL 为 NVIDIA
+  - 配置管理 (config.ts) — provider 检测、API key 解析、base URL 解析
+  - Agent Loop (agent-loop.ts) — 工具调用循环、并行执行、budget 管理
+  - Chat Route (route.ts) — 22 个 web-compatible 工具处理器
+  - Skills 系统 (skills.ts, default-skills.ts) — 9 个内置 skills、扫描/创建/管理
+  - Prompt Builder (prompt-builder.ts) — 系统提示组装
+
+- 发现并修复 3 个模型配置 bug：
+  1. **DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"** → 改为 "glm-4-flash"
+     - NVIDIA 模型在当前环境无 API Key，默认选中导致 agent 无法调用 LLM
+  2. **resolveProvider() 默认回退到 "nvidia"** → 改为 "glm"
+     - 环境无任何 API Key env var 时，回退到无 Key 的 nvidia 而非有 /etc/.z-ai-config 的 glm
+  3. **detectAvailableProviders() 不检测 .z-ai-config 文件** → 新增文件检测
+     - 只检查 env var，忽略了 /etc/.z-ai-config 的存在
+
+- 增强 provider 检测和解析：
+  - detectAvailableProviders(): 检测 env var → .z-ai-config 文件 → config.yaml api_key
+  - resolveApiKey(): 增加从 .z-ai-config 读取 apiKey
+  - resolveBaseUrl(): 增加从 .z-ai-config 读取 baseUrl
+
+- 审查结果：工具调用链路和 skills 系统代码正确
+  - 22 个工具处理器均有正确参数映射和 null 检查
+  - 9 个内置 skills（web-search、code-execution、file-operations、memory、skill-manager、todo、terminal、image-generation、tts、web-browser、clipboard）
+  - skill_manage 支持创建、编辑、patch、删除
+  - skills 系统提示正确注入到 agent system prompt
+
+- ESLint 通过，commit 9cdc0fa + push 到 origin/main
+
+Stage Summary:
+- 2 个文件修改：models.ts + config.ts
+- 默认模型从 NVIDIA (无 Key) 改为 GLM (有 /etc/.z-ai-config)
+- Provider 检测现在覆盖 env var + .z-ai-config 文件 + config.yaml 三种来源
+- 工具调用和 skills 系统代码审查通过，逻辑完整正确
