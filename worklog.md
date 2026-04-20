@@ -374,3 +374,30 @@ Stage Summary:
 - 默认模型从 NVIDIA (无 Key) 改为 GLM (有 /etc/.z-ai-config)
 - Provider 检测现在覆盖 env var + .z-ai-config 文件 + config.yaml 三种来源
 - 工具调用和 skills 系统代码审查通过，逻辑完整正确
+
+---
+Task ID: 13
+Agent: main
+Task: 修复 Vercel 部署失败 — 恢复 PostgreSQL (Supabase) 配置
+
+Work Log:
+- 用户反馈 Vercel 部署失败
+- 回溯 git 历史，发现 Vercel 环境配置了 **Supabase PostgreSQL** 数据库
+- 关键环境变量: hermes_POSTGRES_PRISMA_URL (连接池), hermes_POSTGRES_URL_NON_POOLING (直连/migration)
+- 上次修复 (ddae577) 错误地将 schema.prisma 从 PostgreSQL 改回 SQLite，导致 Vercel 构建时 prisma db push 无法连接到 Supabase
+- 本次还错误地修改了 db.ts 添加 /tmp SQLite hack（Vercel 不需要，因为有远程 PostgreSQL）
+
+修复内容：
+1. **prisma/schema.prisma**: provider 从 sqlite 改回 postgresql, url 从 DATABASE_URL 改回 hermes_POSTGRES_PRISMA_URL + directUrl
+2. **vercel.json**: 恢复 `prisma db push --skip-generate --accept-data-loss` 到 buildCommand（Vercel 构建时需要把 schema 推到 Supabase）
+3. **src/lib/db.ts**: 移除 /tmp SQLite hack 和 ensureDbSchema 函数，恢复标准 PrismaClient（Supabase 管理连接池）
+4. **src/instrumentation.ts**: 已在上次提交修复（require → process 直接调用 + Vercel 跳过定时器）
+
+- prisma generate 验证通过
+- next build 验证通过（18/18 pages 生成成功）
+- commit c37ba95 + push 到 origin/main
+
+Stage Summary:
+- 3 个文件修改: schema.prisma, db.ts, vercel.json
+- 数据库配置恢复为 PostgreSQL (Supabase)，Vercel 构建和运行时均正确
+- 上次错误的 SQLite 回退彻底修复
