@@ -200,3 +200,32 @@ Stage Summary:
 - Dashboard 新增 Model Benchmark 卡片
 - NVIDIA NIM 网络连通性已验证
 - ⚠️ 需要用户在 Settings 中配置 NVIDIA_API_KEY 才能进行实际测速
+---
+Task ID: 8
+Agent: main
+Task: 检查 Vercel 部署的沙箱模式是否正常使用
+
+Work Log:
+- 审查 modal-sandbox.ts 代码，发现使用完全错误的 Modal JS SDK API：
+  - 旧代码：`new Sandbox({ tokenId, tokenSecret })` + `this.modalClient.interactive.launch/exec`
+  - 正确 API：`new ModalClient()` + `client.apps.fromName()` + `client.sandboxes.create()` + `sandbox.exec(['bash','-c',cmd])`
+- 完全重写 modal-sandbox.ts（440→310 行），使用正确的 Modal JS SDK v0.7.4 API
+- 创建 /api/sandbox 健康检查端点（GET 查状态，POST 执行命令）
+- 更新 chat/route.ts 中的 6 个工具处理器以支持 Modal 沙箱后端：
+  - handleTerminal（已有 Modal 支持，简化为使用 resolveBackend()）
+  - handleExecuteCode（新增 Modal 分支：写文件到沙箱并执行）
+  - handleReadFile（新增 Modal 分支：通过 shell 读取沙箱文件）
+  - handleWriteFile（新增 Modal 分支：创建目录并写文件到沙箱）
+  - handleSearchFiles（新增 Modal 分支：通过 grep 在沙箱搜索）
+  - handlePatch（新增 Modal 分支：写 Python 脚本到沙箱执行 base64 安全替换）
+- 添加 Vercel Serverless 自动检测逻辑：
+  - 在 Vercel 环境中，如果检测到 MODAL_TOKEN_ID/SECRET 环境变量，自动切换到 modal 后端
+  - 应用于工具处理器和系统提示生成
+- commit 7886b91 + push 到 origin/main
+
+Stage Summary:
+- 🔴 关键 Bug 修复：modal-sandbox.ts 使用了不存在的 API，沙箱完全无法工作
+- 3 个文件修改：modal-sandbox.ts（重写）、chat/route.ts（6 个处理器更新）、sandbox/route.ts（新建）
+- 新增 /api/sandbox 端点用于健康检查和命令执行测试
+- Vercel 部署时，只要配置了 MODAL_TOKEN_ID 和 MODAL_TOKEN_SECRET，所有工具自动切换到 Modal 沙箱
+- 需要 Vercel 环境变量：MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
