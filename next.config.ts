@@ -8,8 +8,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   // Allow cross-origin requests from preview domains
   allowedDevOrigins: [
-    /\.space\.z\.ai$/,
-    /\.z\.ai$/,
+    "*.space.z.ai",
+    "*.z.ai",
   ],
   // Allow external image domains if needed
   images: {

@@ -747,7 +747,7 @@ class ToolRegistryAdapter implements ToolRegistryInterface {
     }
   }
 
-  private handleClarify(args: Record<string, unknown>): Promise<string> {
+  private handleClarify(args: Record<string, unknown>): string {
     const question = String(args.question ?? "Could you clarify what you mean?");
     return JSON.stringify({
       clarificationNeeded: true,

@@ -17,6 +17,7 @@ let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 
 export async function register() {
   // This function is called once when the Next.js server starts
+  // Only run in Node.js runtime — not Edge Runtime
   if (process.env.NEXT_RUNTIME === "nodejs") {
     startScheduler();
   }
@@ -29,6 +30,18 @@ async function startScheduler() {
   }
 
   console.log("[Scheduler] Starting background cron scheduler (tick every 60s)...");
+
+  // Register signal handlers via dynamic require to avoid Turbopack static analysis
+  // warning about Edge Runtime. These are Node.js-only APIs guarded by the
+  // NEXT_RUNTIME check in register().
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodeProcess = require("node:process");
+    nodeProcess.on("SIGTERM", stopScheduler);
+    nodeProcess.on("SIGINT", stopScheduler);
+  } catch {
+    // Not in Node.js environment — skip signal handlers
+  }
 
   // Run an initial tick on startup (with delay to let the server fully start)
   setTimeout(async () => {
@@ -75,12 +88,6 @@ async function startScheduler() {
       );
     }
   }, 8000); // 8s delay to ensure server is fully ready
-
-  // Handle graceful shutdown
-  if (typeof process !== "undefined") {
-    process.on("SIGTERM", stopScheduler);
-    process.on("SIGINT", stopScheduler);
-  }
 }
 
 function stopScheduler() {

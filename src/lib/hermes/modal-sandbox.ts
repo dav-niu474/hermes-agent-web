@@ -433,7 +433,7 @@ class ModalSandboxManager {
 
     try {
       // Use sandbox.exec to write file content via heredoc
-      const escapedContent = content.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
+      // The 'HERMES_EOF' delimiter is quoted to prevent variable expansion
       const writeCmd = `cat > '${remotePath}' << 'HERMES_EOF'\n${content}\nHERMES_EOF`;
       const proc = await sandbox.exec(['bash', '-c', writeCmd], { timeoutMs: 30_000, mode: 'text' });
       await proc.wait();
@@ -461,7 +461,8 @@ class ModalSandboxManager {
       const proc = await sandbox.exec(['bash', '-c', `cat '${remotePath}'`], { timeoutMs: 15_000, mode: 'text' });
       const stdout = await proc.stdout.readText();
       this.resetIdleTimer();
-      return stdout || null;
+      // Return content as-is; empty string means empty file, null means read failed (caught below)
+      return stdout;
     } catch (err) {
       console.error(`[ModalSandbox] readFile failed for ${remotePath}:`, err);
       return null;
