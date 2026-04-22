@@ -263,9 +263,10 @@ class ModalSandboxManager {
         console.log(`[ModalSandbox] Provisioning stderr: ${stderr.slice(-200)}`);
       }
     } catch (err) {
-      // Provisioning failure is non-fatal — log but continue
-      console.warn('[ModalSandbox] Provisioning failed (non-fatal):', err);
-      this.state.provisioned = true; // Don't retry
+      // Provisioning failure — log but do NOT mark as provisioned
+      // so the next execution attempt will retry provisioning.
+      console.warn('[ModalSandbox] Provisioning failed, will retry on next execution:', err);
+      this.state.provisioned = false;
     }
   }
 

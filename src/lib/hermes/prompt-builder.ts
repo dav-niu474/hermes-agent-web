@@ -83,6 +83,14 @@ export const TOOL_USE_ENFORCEMENT_MODELS = [
   "gemini",
   "gemma",
   "grok",
+  "llama",
+  "mistral",
+  "nemotron",
+  "qwen",
+  "deepseek",
+  "glm",
+  "phi",
+  "claude",
 ] as const;
 
 /** OpenAI GPT/Codex execution discipline guidance. */
@@ -159,6 +167,22 @@ export const GOOGLE_MODEL_OPERATIONAL_GUIDANCE =
   "to prevent CLI tools from hanging on prompts.\n" +
   "- **Keep going:** Work autonomously until the task is fully resolved. " +
   "Don't stop with a plan — execute it.\n";
+
+/** NVIDIA / Llama / Mistral / Nemotron model operational guidance. */
+export const NVIDIA_MODEL_OPERATIONAL_GUIDANCE =
+  "# Agent operational directives\n" +
+  "You are an AGENT with tool-calling capability. Follow these rules strictly:\n" +
+  "- **MUST use tools:** You have tools available. Use them to accomplish tasks. " +
+  "Never describe what you would do — actually do it by making a tool call.\n" +
+  "- **Format:** When calling a tool, use the structured tool_call format provided by the API. " +
+  "Return a tool_calls array with name and JSON arguments. Do NOT output tool calls as text.\n" +
+  "- **One action per turn or batch:** You may call multiple independent tools in one turn. " +
+  "For dependent operations, call the first tool, wait for the result, then proceed.\n" +
+  "- **JSON arguments:** Tool arguments must be valid JSON. Double-check quotes and escaping.\n" +
+  "- **File operations:** Always use absolute paths. Check if files exist before editing.\n" +
+  "- **Commands:** Use non-interactive flags (-y, --yes). Handle errors gracefully.\n" +
+  "- **Verification:** After making changes, verify the result with read_file or terminal.\n" +
+  "- **Keep going:** Work autonomously until the task is fully complete. Do not stop early.";
 
 /** Platform-specific formatting hints. */
 export const PLATFORM_HINTS: Record<string, string> = {
@@ -320,7 +344,9 @@ export async function buildSystemPrompt(
       (m) => modelLower.includes(m),
     );
 
-    if (shouldEnforce) {
+    // Always inject tool-use enforcement for all models — it's critical
+    // for agent functionality, not just a "nice to have" for certain models.
+    if (shouldEnforce || toolNames.size > 0) {
       parts.push(TOOL_USE_ENFORCEMENT_GUIDANCE);
 
       // Google model operational guidance
@@ -337,6 +363,19 @@ export async function buildSystemPrompt(
         modelLower.includes("codex")
       ) {
         parts.push(OPENAI_MODEL_EXECUTION_GUIDANCE);
+      }
+
+      // NVIDIA / Llama / Mistral / Nemotron operational guidance
+      if (
+        modelLower.includes("llama") ||
+        modelLower.includes("mistral") ||
+        modelLower.includes("nemotron") ||
+        modelLower.includes("nvidia") ||
+        modelLower.includes("deepseek") ||
+        modelLower.includes("qwen") ||
+        modelLower.includes("phi")
+      ) {
+        parts.push(NVIDIA_MODEL_OPERATIONAL_GUIDANCE);
       }
     }
   }

@@ -2100,12 +2100,28 @@ export async function POST(request: NextRequest) {
           // Save assistant message to local DB
           if (localSessionId && fullContent) {
             const duration = Date.now() - startTime;
+            // Collect tool calls from the result for persistence
+            let toolCallsJson: string | undefined;
+            try {
+              const resultToolCalls = result.messages
+                ?.filter((m: AgentMessage) => m.tool_calls && m.tool_calls.length > 0)
+                .map((m: AgentMessage) => m.tool_calls!.map(tc => ({
+                  id: tc.id,
+                  type: tc.type,
+                  function: tc.function,
+                })));
+              if (resultToolCalls && resultToolCalls.length > 0) {
+                toolCallsJson = JSON.stringify(resultToolCalls.flat());
+              }
+            } catch { /* ignore tool call serialization errors */ }
+
             await db.chatMessage
               .create({
                 data: {
                   sessionId: localSessionId,
                   role: "assistant",
                   content: fullContent,
+                  toolCalls: toolCallsJson,
                   duration,
                   tokens: totalInputTokens + totalOutputTokens || undefined,
                 },

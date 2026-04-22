@@ -492,8 +492,22 @@ export class AgentLoop {
         });
       }
 
-      // Check for tool calls
-      const toolCalls = assistantMsg.tool_calls;
+      // Check for tool calls — native format first, then fallback to prompt-based parsing
+      let toolCalls = assistantMsg.tool_calls;
+
+      // Fallback: if the model returned text but no tool_calls, try to parse
+      // prompt-based tool calls from the content (for models that don't natively
+      // support function calling but received tools in the request).
+      if ((!toolCalls || toolCalls.length === 0) && assistantMsg.content && this.toolSchemas.length > 0) {
+        const promptCalls = this.parsePromptBasedToolCalls(assistantMsg.content);
+        if (promptCalls && promptCalls.length > 0) {
+          toolCalls = promptCalls;
+          onEvent?.({
+            type: "reasoning",
+            data: "[Fallback] Detected tool call in text response, routing to tool execution.",
+          });
+        }
+      }
 
       if (toolCalls && toolCalls.length > 0) {
         // Validate and normalise tool call JSON
@@ -658,12 +672,15 @@ export class AgentLoop {
       model: this.config.model,
       messages,
       n: 1,
-      temperature: 1.0,
+      temperature: 0.3,
     };
 
     // Attach tools if we have any
     if (this.toolSchemas.length > 0) {
       chatParams.tools = this.toolSchemas;
+      // Explicitly request tool use — critical for llama/mistral/nvidia models
+      // that may otherwise ignore tool definitions and respond with plain text.
+      chatParams.tool_choice = "auto";
     }
 
     // Max tokens if specified
@@ -1095,6 +1112,71 @@ export class AgentLoop {
       }
     }
     return "";
+  }
+
+  /**
+   * Attempt to parse prompt-based tool calls from plain text responses.
+   * Some models (especially llama variants on NVIDIA NIM) may not use the
+   * native `tool_calls` field but instead embed tool calls in text using
+   * various formats. This method tries to extract them.
+   */
+  private parsePromptBasedToolCalls(content: string): ToolCall[] | null {
+    if (!content || content.trim().length < 10) return null;
+
+    // Pattern 1: JSON code block with function call
+    // ```json
+    // {"name": "tool_name", "arguments": {...}}
+    // ```
+    const jsonBlockMatch = content.match(/```(?:json)?\s*\n?(\{[\s\S]*?\})\s*\n?```/);
+    if (jsonBlockMatch) {
+      try {
+        const parsed = JSON.parse(jsonBlockMatch[1]);
+        if (parsed.name && this.validToolNames.has(parsed.name)) {
+          return [{
+            id: `prompt-tool-${Date.now()}`,
+            type: "function",
+            function: {
+              name: parsed.name,
+              arguments: typeof parsed.arguments === "string" ? parsed.arguments : JSON.stringify(parsed.arguments ?? {}),
+            },
+          }];
+        }
+      } catch { /* not valid JSON */ }
+    }
+
+    // Pattern 2: Inline function call like FUNCTION_CALL(tool_name, {args})
+    const funcCallMatch = content.match(/FUNCTION_CALL\s*\(\s*["']?(\w+)["']?\s*,\s*(\{[^}]*\})\s*\)/i);
+    if (funcCallMatch) {
+      const name = funcCallMatch[1];
+      if (this.validToolNames.has(name)) {
+        try {
+          JSON.parse(funcCallMatch[2]);
+          return [{
+            id: `prompt-tool-${Date.now()}`,
+            type: "function",
+            function: { name, arguments: funcCallMatch[2] },
+          }];
+        } catch { /* invalid args JSON */ }
+      }
+    }
+
+    // Pattern 3: [TOOL_CALL]tool_name{"key": "value"}[/TOOL_CALL]
+    const toolCallTag = content.match(/\[TOOL_CALL\]\s*(\w+)\s*(\{[\s\S]*?\})\s*\[\/TOOL_CALL\]/i);
+    if (toolCallTag) {
+      const name = toolCallTag[1];
+      if (this.validToolNames.has(name)) {
+        try {
+          JSON.parse(toolCallTag[2]);
+          return [{
+            id: `prompt-tool-${Date.now()}`,
+            type: "function",
+            function: { name, arguments: toolCallTag[2] },
+          }];
+        } catch { /* invalid args JSON */ }
+      }
+    }
+
+    return null;
   }
 
   /**
