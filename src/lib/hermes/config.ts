@@ -437,9 +437,10 @@ export function detectAvailableProviders(): string[] {
       ];
       for (const cfgPath of zaiConfigPaths) {
         try {
-          existsSync(cfgPath);
-          available.push("glm");
-          break;
+          if (existsSync(cfgPath)) {
+            available.push("glm");
+            break;
+          }
         } catch {
           // not found, continue
         }
@@ -740,7 +741,7 @@ export function getLLMConfig(overrideModel?: string, overrideProvider?: string):
         break;
       case "glm":
       case "zai":
-        model = "glm-4.5-flash";
+        model = "glm-4-flash";
         break;
       default:
         model = "gpt-4o-mini";

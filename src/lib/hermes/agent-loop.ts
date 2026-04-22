@@ -337,10 +337,7 @@ function injectBudgetWarning(
 const SURROGATE_RE = /[\ud800-\udfff]/g;
 
 function sanitizeSurrogates(text: string): string {
-  if (SURROGATE_RE.test(text)) {
-    return text.replace(SURROGATE_RE, "\ufffd");
-  }
-  return text;
+  return text.replace(SURROGATE_RE, "\ufffd");
 }
 
 // ---------------------------------------------------------------------------
@@ -501,10 +498,6 @@ export class AgentLoop {
       if (toolCalls && toolCalls.length > 0) {
         // Validate and normalise tool call JSON
         const validatedCalls = this.validateToolCallArguments(toolCalls);
-        if (!validatedCalls) {
-          // JSON was unfixable — inject error results and continue loop
-          continue;
-        }
 
         // Build assistant message for history
         const assistantMessage: AgentMessage = {
@@ -688,8 +681,14 @@ export class AgentLoop {
       let content = "";
       let toolCallsAcc: OpenAI.ChatCompletionMessage.ToolCall[] = [];
       let finishReason: OpenAI.ChatCompletion.Choice["finish_reason"] = "stop";
+      let streamUsage: OpenAI.CompletionUsage | undefined;
 
       for await (const chunk of streamResponse as AsyncIterable<OpenAI.ChatCompletionChunk>) {
+        // Extract usage from chunk if available (sent by some providers in final chunk)
+        if (chunk.usage) {
+          streamUsage = chunk.usage;
+        }
+
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
 
@@ -754,7 +753,7 @@ export class AgentLoop {
             finish_reason: finishReason ?? "stop",
           },
         ],
-        usage: {
+        usage: streamUsage ?? {
           prompt_tokens: 0,
           completion_tokens: 0,
           total_tokens: 0,
@@ -858,9 +857,8 @@ export class AgentLoop {
 
   /**
    * Validate tool call argument JSON strings.
-   * Returns null if the arguments are unfixable (should continue loop without
-   * appending anything — the caller will inject error results).
-   * Returns the validated (and possibly fixed) tool calls otherwise.
+   * Normalises tool call arguments, fixing common LLM JSON issues.
+   * Always returns the normalised tool calls (never null).
    */
   private validateToolCallArguments(
     toolCalls: OpenAI.ChatCompletionMessage.ToolCall[],
@@ -908,15 +906,6 @@ export class AgentLoop {
           arguments: args,
         },
       });
-    }
-
-    if (invalidArgs.length > 0) {
-      // Rather than returning null and forcing the caller to handle it,
-      // return the normalised calls but the caller should inject error
-      // results for the invalid ones.  We fix the JSON to "{}" for
-      // calls with empty args so the loop can still proceed for valid calls.
-      // Mark invalid ones by injecting error results directly.
-      return normalised;
     }
 
     return normalised;

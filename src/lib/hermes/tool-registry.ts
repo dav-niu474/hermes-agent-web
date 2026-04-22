@@ -527,7 +527,7 @@ function coerceNumber(value: string, integerOnly: boolean): any {
   try {
     const f = parseFloat(value);
     if (Number.isNaN(f) || !Number.isFinite(f)) return value;
-    if (f === Math.floor(f)) return integerOnly ? Math.floor(f) : Math.floor(f);
+    if (f === Math.floor(f)) return f;
     if (integerOnly) return value; // Has decimals but schema wants int
     return f;
   } catch {
